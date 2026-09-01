@@ -9,25 +9,78 @@
 > [issues](https://github.com/DrDroidLab/marmot/issues) or on
 > [Discord](https://discord.gg/AQ3tusPtZn).
 
-**Your own Claude Code token consumption, read from the session records already on your machine.**
+**Spend fewer tokens on Claude Code — with nudges that arrive while you can still do something about it.**
 
-Claude Code writes every session to `~/.claude/projects/**.jsonl` as it runs. Marmot reads those files and tells you what your sessions cost, where the turns went, and when something is worth a second look.
+Most of what you burn is not the work. It is context you are carrying and not
+using, tool definitions loaded on every request and never called, a premium
+model on a job that did not need one, a session that has been open for three
+days. None of it announces itself, and by the time a number looks wrong the
+tokens are gone.
+
+Marmot reads the session records Claude Code already writes to your disk, finds
+those patterns, and interrupts you at the point where stopping is still worth
+something. Same tokens your plan limits are counted in.
 
 ```bash
-npx @drdroidlab/marmot --demo      # synthetic data, to see the shape of it
-npx @drdroidlab/marmot             # your own, last 30 days
+npx @drdroidlab/marmot --demo      # see the nudges on synthetic data
+npx @drdroidlab/marmot             # then on your own
 ```
 
-Node 18+, zero dependencies, entirely local. Works on **Pro, Max and Team** plans.
+Node 18+, zero dependencies, entirely local. Works on **all Claude plans**.
+
+---
+
+## What it catches
+
+A real one, from the machine this was built on:
+
+```
+  ▲ MCP servers attached but never called
+    sentry, github, kubernetes, datadog, linear, google-sheets — configured,
+    and not invoked once in this window. Their tool definitions are ~16,262
+    tokens, sent with every request — 43% of your 37.4K median session prefix.
+    Detaching what you do not use is a straight saving on every request.
+```
+
+Nothing in Claude Code surfaces that, and it had been true for weeks. The rest
+of what it looks for:
+
+| Nudge | The waste it finds |
+|---|---|
+| `mcp-idle` | Tool definitions shipped on every request for servers you never call |
+| `session-turns` | A long session re-sending every earlier turn into every later one |
+| `session-topics` | A session resumed days later, still carrying context for work you finished |
+| `premium-light-work` | A premium model on a job Sonnet would have done |
+| `premium-window` | …and that becoming a habit rather than a one-off |
+| `cache-hit` | Context being rebuilt each turn instead of continued — cache reads cost a tenth of fresh input |
+| `tool-errors` | Failed calls, paid for twice: once to fail, once to retry |
+| `session-cost` / `daily-cost` / `daily-baseline` | A session or a day past the ceiling you set, or well past your own normal |
+
+Every rule is deterministic and local. **No model decides whether to nudge
+you**, and every threshold is yours to move.
+
+## When it reaches you
+
+Timing is the whole point, so you choose which rules speak when:
+
+- **Mid-session**, at the end of a turn, for the rules in `live` — the only
+  moment you can still change course. Once per rule, again at each doubling for
+  cost, with a bell and a notification so it does not scroll past.
+- **Once a day** for everything else. A nudge you cannot act on right now is an
+  interruption, not a nudge.
+- **In the statusline**, if you want it always in view.
+
+## The evidence behind every nudge
+
+A nudge you cannot trace produces suspicion rather than a change of habit, so
+`marmot` prints the window every figure came from:
 
 ```
   Marmot · your last 30 days
   40 sessions · everything below was read from ~/.claude/projects on this machine
 
   Spend              $4,184     modelled at published rates
-  Sessions           40         18 active days
   Prompts you typed  926        per session: 23.1 mean · 16 median · 79 p99
-  Model turns        13,823     14.9 per prompt
   Tokens             5.8B       input, output and cache
   Cache hit rate     98%        higher is cheaper
   Tool calls         13,768     3% failed
@@ -41,16 +94,20 @@ Node 18+, zero dependencies, entirely local. Works on **Pro, Max and Team** plan
 
   Skills
   dataviz            6×         ~4.1K tokens to load
-  code-review        5×         ~1.8K tokens to load
 
-  MCP servers called
-  github             70×
-  sentry             12×
+  MCP servers
+  github            142×  26 tools · ~4.0K tokens
+  sentry              0×  14 tools · ~2.3K tokens  ▲ never called
+                    18,825 tokens on every request, 16,262 of them idle
 ```
 
-**Baseline context** is the prefix carried into every request before you type anything — system prompt, skill descriptions and every attached tool definition. It is the number to look at when you wonder what an idle MCP server is costing you.
+**Baseline context** is what every request carries before you type — system
+prompt, skill descriptions, every attached tool definition — and it is what
+makes an idle server legible as a cost rather than a checkbox.
 
-Spend is a **shadow price** — what these tokens would have cost at published API rates. On a subscription plan it is not an invoice line. Right for comparing your own sessions to each other, wrong for finance.
+Spend is a **shadow price**: what these tokens would have cost at published API
+rates, not an invoice line. Right for comparing your own sessions to each
+other, wrong for finance.
 
 ---
 
@@ -63,7 +120,8 @@ npx @drdroidlab/marmot            # no install
 npm i -g @drdroidlab/marmot       # or keep it
 ```
 
-**As a Claude Code plugin** — the same numbers, without leaving Claude Code.
+**As a Claude Code plugin** — this is the one that saves you tokens, because it
+is the only way the mid-session nudges can reach you at all.
 
 ```
 /plugin marketplace add DrDroidLab/marmot
@@ -72,10 +130,13 @@ npm i -g @drdroidlab/marmot       # or keep it
 
 Then **restart Claude Code** — hooks and commands only load at session start. You get:
 
-- `/marmot:usage` — the report, every session, and the nudges.
-- `/marmot:config` — open your thresholds file.
-- **A daily digest** on your first session each day: what yesterday cost, and what it flagged.
-- **Live nudges** at the end of a turn, for the rules in `live` only — once per session per rule, and again at each doubling for cost. Each one rings the bell and raises a desktop notification.
+- **Live nudges** at the end of a turn, for the rules in `live` — the ones you
+  can still act on. Once per session per rule, again at each doubling for cost,
+  with a bell and a desktop notification so they do not scroll past.
+- **A daily digest** on your first session each day: what yesterday cost, and
+  what it flagged.
+- `/marmot:usage` — everything, on demand.
+- `/marmot:config` — move a threshold.
 
 Check it loaded — the status line, not the component count:
 
@@ -93,23 +154,25 @@ npx @drdroidlab/marmot init --statusline
 $12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
 ```
 
-The `▲` appears once you're past your own caps.
+The `▲` appears once you're past your own caps — the cheapest possible reminder,
+always in view.
 
 ## Usage
 
 | Command | Slash command | What it does |
 |---|---|---|
-| `marmot` | `/marmot:usage` | The report — spend, trends, every session, nudges |
+| `marmot` | `/marmot:usage` | Nudges, plus the window they came from |
 | `marmot config` | `/marmot:config` | Open the thresholds file |
 | `marmot browse` | | Build the session browser page and open it |
-| `marmot nudges` | | Only what's worth knowing |
+| `marmot nudges` | | Just the nudges, nothing else |
 | `marmot sessions` | | One line per session |
 | `marmot mcp-audit` | | Measure what each MCP server's tool definitions cost |
 | `marmot doctor` | | What's readable on this machine, and what isn't |
 | `marmot init` | | Write the thresholds file |
 
-`/marmot:usage` is the one command to reach for: it prints the report with every
-session listed, and `--browse` opens the full page from there.
+`/marmot:usage` is the one to reach for. `marmot nudges` is the same findings
+with the reporting stripped out, which is what you want in a script or a
+pre-commit hook.
 
 | Flag | |
 |---|---|
@@ -124,20 +187,21 @@ session listed, and `--browse` opens the full page from there.
 | `--no-text` | `browse`: counts and tool names only, no prompts |
 | `--no-audit` | Skip measuring MCP servers this run |
 
-### The session browser
+### Chasing a nudge to its source
 
 One self-contained HTML file, written locally and opened in your browser — no CDN, no network, no web fonts.
 
-It opens on **the same figures as the report** — spend, tokens, cache, baseline context, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. From there each session opens onto its full timeline: every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle.
+It opens on **the same figures as the report** — spend, tokens, cache, baseline context, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. From there each session opens onto its full timeline — every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle — which is how you find the turn where a session started getting expensive.
 
 ![The session browser](docs/browse-index.png)
 
 ![A single session](docs/browse-session.png)
 
-### What your MCP servers cost
+### Finding the cheapest saving you have
 
-Every attached server's tool definitions are sent with **every** request, and
-nothing on disk records how big they are. So this asks the servers directly:
+Idle MCP servers are usually the largest single win, because their cost is paid
+on *every* request rather than once. Nothing on disk records how big those tool
+definitions are, so Marmot asks the servers directly:
 
 ```bash
 npx @drdroidlab/marmot mcp-audit
@@ -155,16 +219,17 @@ npx @drdroidlab/marmot mcp-audit
   sentry, datadog
 ```
 
-The report runs this for you when it has no recent figures, showing progress as
-it goes, and caches the result in `~/.claude/marmot-mcp.json` for a week. It is
-the only thing Marmot does that **starts your servers** rather than reading a
-file — set `mcp.autoAudit` to `false` to only ever measure on demand, or pass
-`--no-audit` for one run. `--tools` breaks it down per tool.
+The report does this for you when it has no recent figures, and caches the
+result for a week. It is the only thing Marmot does that **starts your servers**
+rather than reading a file — `mcp.autoAudit: false` or `--no-audit` keeps it
+read-only. `--tools` breaks it down per tool.
 
 ## Configuration
 
-Everything runs on defaults, so this is optional. When you do want to move a
-threshold:
+The defaults are deliberately quiet, so this is optional — but it is the
+difference between nudges you act on and nudges you mute. If a rule fires on
+most of your sessions it is describing how you work rather than flagging
+anything, and it should be raised, not ignored.
 
 ```bash
 marmot config          # opens ~/.claude/marmot.json, creating it if you have none
@@ -174,11 +239,9 @@ marmot config --print  # ...and print it to the terminal
 or `/marmot:config` inside Claude Code. Nothing needs restarting — the next run
 reads it.
 
-It opens in a real text editor, not a preview: `$VISUAL`/`$EDITOR` if you have
-one set, otherwise your default text editor on macOS, Notepad on Windows,
-`xdg-open` on Linux. A terminal editor like vim is only used when there is a
-terminal to attach it to, so `/marmot:config` inside Claude Code opens a window
-instead of hanging.
+It opens in a real text editor rather than a preview — `$VISUAL`/`$EDITOR`, else
+the platform default. A terminal editor like vim is used only where there is a
+terminal to attach it to, so `/marmot:config` opens a window instead of hanging.
 
 ### The nudge thresholds
 
@@ -235,23 +298,15 @@ above — these are just the ones worth knowing about.
 `notify.desktop` raises a system notification. Set either to `false`.
 `MARMOT_NO_NOTIFY=1` silences both for one run, and CI is silent automatically.
 
-**How a notification gets to you.** Two channels, tried in order:
+**How a notification gets to you.** Your terminal posts it itself where it can,
+via an OSC escape sequence — iTerm2, Ghostty, WezTerm, kitty, Konsole, Windows
+Terminal and Hyper all support this, with nothing to install or allow.
+Otherwise the OS does: `osascript`, `notify-send` or PowerShell, all of which
+ship with it. `marmot doctor` names the channel in force.
 
-1. **Your terminal posts it itself**, via an OSC escape sequence — iTerm2,
-   Ghostty, WezTerm, kitty, Konsole, Windows Terminal and Hyper all support
-   this. Nothing to install, nothing to allow, identical on every platform.
-   This is the one that just works.
-2. **The operating system**, where the terminal has no such channel:
-   `osascript` on macOS, `notify-send` on Linux, a PowerShell notification on
-   Windows. All three ship with the OS.
-
-The notification shows the marmot on Linux and Windows. macOS shows the posting
-application's icon and gives `display notification` no say in it, so there it
-carries your terminal's.
-
-Terminals not known to support the sequence are never sent one — an
-unrecognised escape code can print as visible garbage, which is worse than a
-missing notification. `marmot doctor` names the channel in force.
+Terminals not known to support the sequence are never sent one, since an
+unrecognised escape code can print as visible garbage. The marmot appears on
+Linux and Windows; macOS shows the posting app's icon and gives us no say.
 
 ### If no notification arrives
 
@@ -267,27 +322,20 @@ Marmot will help until it is off.
 | **GNOME** | Settings → **Notifications** → *Do Not Disturb* off. |
 | **KDE Plasma** | System Settings → **Notifications** → *Do Not Disturb* off. |
 
-**Then check the app is allowed** (macOS and Windows only):
+**Then check the app is allowed.** On macOS, System Settings → Notifications →
+the app `marmot doctor` names. If it is not in that list it cannot be granted —
+macOS only lists apps that have registered themselves — so point Marmot at one
+that is: `"notify": { "app": "com.googlecode.iterm2" }`, a bundle id or an app
+name. On Windows, allow notifications from PowerShell. On Linux, `notify-send`
+needs libnotify (`libnotify-bin` on Debian and Ubuntu).
 
-- **macOS** — System Settings → **Notifications** → find the app named by
-  `marmot doctor` and allow it. If it is not in that list it cannot be granted:
-  macOS only lists apps that have registered themselves. Point Marmot at one
-  that is, with `"notify": { "app": "com.googlecode.iterm2" }` — a bundle id or
-  an app name both work.
-- **Windows** — Settings → System → Notifications, and make sure notifications
-  from PowerShell are permitted.
-- **Linux** — `notify-send` comes from libnotify. On Debian and Ubuntu that is
-  `sudo apt install libnotify-bin`; it is usually present already. A headless
-  box has no notification daemon, and the attempt fails silently.
+Or set `notify.desktop` to `false` — the bell and the nudge in your transcript
+are unaffected either way.
 
-Or set `notify.desktop` to `false` and rely on the bell and the nudge in your
-transcript, which are unaffected either way.
-
-**About the bell.** `notify.bell` does two things. It writes a terminal BEL to
-`/dev/tty` — a hook's own output is a pipe Claude Code reads, not a terminal,
-so stderr would swallow it — and it asks the desktop notification to play a
-sound, which is audible wherever the notification is visible and needs no
-terminal at all. `notify.sound` names the macOS sound; *Ping* by default.
+**About the bell.** `notify.bell` writes a terminal BEL to `/dev/tty`, and asks
+the notification to play a sound. The sound is the reliable half: a hook's
+output is a pipe Claude Code reads, not a terminal, so stderr would swallow the
+BEL. `notify.sound` names it; *Ping* by default.
 
 **Measuring MCP servers less often.** Raise `mcp.auditMaxAgeDays`, or set
 `mcp.autoAudit` to `false` and run `marmot mcp-audit` when it suits you.
@@ -295,9 +343,12 @@ terminal at all. `notify.sound` names the macOS sound; *Ping* by default.
 **Starting the nudges over.** `~/.claude/marmot-state.json` records what has
 already been said. Delete it to hear everything again.
 
-## How the numbers are counted
+## Why you can trust the numbers
 
-The transcript format is internal and undocumented, and two details in it are easy to read wrong:
+A nudge is only worth acting on if the figure behind it is right. The transcript
+format is internal and undocumented, and two details in it are easy to read
+wrong — both of which would have a rule firing on a session that was fine, or
+staying quiet on one that was not:
 
 - **Cache writes are priced at their actual TTL** — 2× at one hour, 1.25× at five minutes. Claude Code writes 1h entries, so pricing every write at 1.25× understates a heavy session by about a fifth.
 - **Usage is counted once per API response.** Claude Code writes one JSONL entry per content block, and every one repeats the same `usage` object. Summing per entry inflates cost and turns by roughly **1.9× on a tool-heavy session**. Marmot dedupes by `message.id`.
@@ -306,26 +357,11 @@ And a "turn" means **a prompt you typed**. Tool results arrive as user entries t
 
 ## Privacy
 
-Everything runs locally. Nothing is uploaded, and there's no service to upload it to — no account, no API key, no server.
+Everything runs locally. Nothing is uploaded, and there is no service to upload it to — no account, no API key, no server.
 
-The **report** reads only counts, identifiers and tool names, never your prompt or response text. The **browser page** does read them, because that's the point of it; it's a local file that inherits the sensitivity of the transcript it came from, and `marmot browse --no-text` leaves the text out if you want to share it.
+The **report** reads only counts, identifiers and tool names, never your prompt or response text. The **browser page** does read them, because that is the point of it; `marmot browse --no-text` leaves the text out if you want to share it.
 
-Tool *results* are never stored. They're around 95% of the bytes on disk — 40MB of one 42MB transcript — and dropping them is what turns a 41MB transcript into a 1MB page.
-
-## Scope
-
-Marmot covers one developer on one machine, and stays small on purpose.
-
-- **One machine.** A team needs a collector, or Claude Code's OpenTelemetry exporter.
-- **Claude Code only.** Cursor stores per-message token counts but no model identity or cost, so it can't be priced. Copilot's local chat sessions carry no tokens, model or cost at all.
-- **Lines added and removed** need the diff or git history; the transcript names paths only.
-- **Agent-active versus your own time** isn't in these files. OTel has the split.
-
-## Development
-
-```bash
-npm test        # 257 tests, no dependencies, ~6s
-```
+Tool *results* are never stored — around 95% of the bytes on disk, and dropping them is what turns a 41MB transcript into a 1MB page.
 
 ## License
 
