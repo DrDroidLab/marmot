@@ -84,6 +84,7 @@ you**, and every threshold is yours to move.
 | `marmot nudges` | Just the nudges, nothing else |
 | `marmot sessions` | One line per session |
 | `marmot mcp-audit` | Measure what each MCP server's tool definitions cost |
+| `marmot test-notification` | Send one, and say what it did and where to look if it did not arrive |
 | `marmot doctor` | What's readable on this machine, and what isn't |
 | `marmot init` | Write the thresholds file; `--hooks` and `--statusline` install those |
 
@@ -274,6 +275,22 @@ makes an idle server legible as a cost rather than a checkbox.
 Spend is a **shadow price**: what these tokens would have cost at published API
 rates, not an invoice line. Right for comparing your own sessions to each
 other, wrong for finance.
+
+## Upgrading
+
+```bash
+npm install -g github:DrDroidLab/marmot
+```
+
+The same command as installing. npm re-fetches the repository and replaces what
+you have — there is no version to bump, because it installs whatever `main`
+currently is.
+
+If a change does not show up, npm has served the install from its cache:
+
+```bash
+npm cache clean --force && npm install -g github:DrDroidLab/marmot
+```
 
 ## Check it worked
 
@@ -550,6 +567,11 @@ needs libnotify (`libnotify-bin` on Debian and Ubuntu).
 
 Or set `notify.desktop` to `false` — the bell and the nudge in your transcript
 are unaffected either way.
+
+**Testing them.** `marmot test-notification` sends one through exactly the path a
+real nudge uses, then says which channel carried it, whether the bell rang, and
+what to check if nothing appeared — in order of likelihood, starting with the
+quiet-hours setting that suppresses every app at once.
 
 **Making them wait for you.** `notify.persist` is on by default and means "stay
 up until dismissed", as far as each platform allows:

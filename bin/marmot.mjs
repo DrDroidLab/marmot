@@ -51,6 +51,7 @@ if (has("help") || cmd === "help") {
     config set k=v    Change a threshold without opening an editor
     mcp-audit         Ask each configured MCP server for its tools, and measure
                       what their definitions cost on every request
+    test-notification Send one, and say what it did and where to look
     doctor            What is readable on this machine, and what is not
 
   Flags
@@ -460,6 +461,49 @@ async function runBrowse() {
     execFile(opener, [out], () => {});
   }
   return true;
+}
+
+if (cmd === "test-notification" || cmd === "test-notif") {
+  const { alert, deliverability, silenced } = await import("../src/notify.mjs");
+  const d = deliverability({ app: cfg.notify?.app ?? null });
+
+  // The same call a real nudge makes, with the same config — a test that took a
+  // different path would prove nothing about the thing being tested.
+  const did = alert(cfg, {
+    title: "Marmot · Session past the cost cap",
+    body: "This session has reached $82.50 against a $25.00 cap, over 60 model turns.",
+  });
+
+  process.stdout.write(`\n  ${bold("Sent a test notification.")} It is the same call a real nudge makes.\n\n`);
+  const rows = [
+    ["Desktop", cfg.notify?.desktop === false ? warn("off in your config (notify.desktop)") : did.desktop ? `sent · ${did.desktop.via ?? d.detail}` : warn("not sent")],
+    ["Bell", cfg.notify?.bell === false ? dim("off in your config (notify.bell)") : did.bell === "tty" ? "rang the terminal" : did.bell === "stderr" ? dim("written to stderr — no terminal to ring") : warn("not rung")],
+    ["Channel", d.detail],
+    ["Stays up", cfg.notify?.persist === false ? "no — notify.persist is false" : d.persistHint ? warn("macOS decides this, see below") : "yes, until you dismiss it"],
+  ];
+  const w = Math.max(...rows.map((r) => r[0].length));
+  for (const [k, v] of rows) process.stdout.write(`  ${k.padEnd(w)}  ${v}\n`);
+
+  if (silenced()) {
+    process.stdout.write(warn(`\n  MARMOT_NO_NOTIFY or CI is set, so nothing was actually sent.\n`));
+  }
+
+  process.stdout.write(`
+  ${bold("Nothing appeared?")} In order of likelihood:
+
+  1. A quiet-hours setting suppresses every app at once. macOS: click the clock,
+     check Focus. Windows: Settings → System → Notifications → Do not disturb.
+     GNOME/KDE: Settings → Notifications → Do Not Disturb.
+  2. The posting app is not allowed to. ${d.channel === "macos" ? `Yours is ${d.deliverer ?? "Script Editor"} — System Settings → Notifications → allow it, or set notify.app to one you have allowed.` : "Check your notification settings for it."}
+  3. Nothing at all, ever: set notify.desktop to false and rely on the bell and
+     the line in your Claude Code transcript, which are unaffected.
+${d.persistHint ? `\n  ${bold("Fading too fast?")} ${d.persistHint}\n` : ""}
+  marmot config set notify.desktop=false     turn it off
+  marmot config set notify.bell=false        keep the popup, drop the sound
+  marmot doctor                              what Marmot thinks is set up
+
+`);
+  process.exit(0);
 }
 
 if (cmd === "browse") {
