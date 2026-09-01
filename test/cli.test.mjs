@@ -179,16 +179,25 @@ test("report --sessions folds the per-session list into the report", (t) => {
   assert.match(withList, /Prompts you typed/);
 });
 
-test("the report builds and opens the page by default", (t) => {
+test("a piped run writes no page and opens nothing", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  // How an agent, a script or a cron job calls it. Building a multi-megabyte
+  // page and taking over the display is not what those callers asked for, and
+  // the tests themselves run this way — so this is also why the suite is quiet.
+  const { out } = run(["report", "--days", "7", "--no-audit", "--root", root]);
+  assert.match(out, /Prompts you typed/, "the report still prints");
+  assert.equal(existsSync(join(root, "marmot")), false, "and nothing was written");
+});
+
+test("--browse forces the page even when output is piped", (t) => {
   const { root, cleanup } = populatedRoot();
   t.after(cleanup);
   const out = join(root, "page.html");
-  // --no-open keeps the browser shut; the page is still built, which is what
-  // this asserts.
-  const { out: stdout } = run(["report", "--days", "7", "--sessions", "--no-open", "--out", out, "--root", root]);
-  assert.match(stdout, /Prompts you typed/, "the report still prints");
+  const { out: stdout } = run(["report", "--days", "7", "--sessions", "--browse", "--no-open", "--no-audit", "--out", out, "--root", root]);
+  assert.match(stdout, /Prompts you typed/);
   assert.match(stdout, /Sessions · 1/);
-  assert.match(stdout, /Wrote /, "and the page was written");
+  assert.match(stdout, /Wrote /);
   assert.ok(readFileSync(out, "utf8").includes("sess-aaaa1111"));
 });
 

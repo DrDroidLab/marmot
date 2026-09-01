@@ -65,7 +65,8 @@ if (has("help") || cmd === "help") {
 
   report only
     --sessions        List every session in the window under the report
-    --no-browse       Do not build and open the session browser page
+    --browse          Build and open the page even when output is piped
+    --no-browse       Never build or open it
     --no-audit        Do not measure MCP servers, even with no recent figures
     --no-refresh      Do not refresh plan limits, even when the window has reset
 
@@ -661,9 +662,13 @@ process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEM
 // `--no-browse`. One command, the numbers and somewhere to dig in.
 if (has("sessions")) process.stdout.write(`\n${renderSessionList(sessions, { heading: true })}\n\n`);
 
-// The page is the better place to read all of this, so it is built and opened
-// unless you say otherwise. `--no-browse` keeps the run to the terminal.
-if (!has("no-browse") && !has("json")) {
+// The page is the better place to read all of this, so a person at a terminal
+// gets it built and opened. A run whose output is piped — an agent, a script, a
+// cron job — gets the terminal report only: writing a multi-megabyte page and
+// hijacking the display is not what those callers asked for. `--browse` forces
+// it anyway, `--no-browse` never.
+const interactive = Boolean(process.stdout.isTTY);
+if (!has("no-browse") && !has("json") && (interactive || has("browse"))) {
   process.stdout.write("\n");
   await runBrowse();
 }
