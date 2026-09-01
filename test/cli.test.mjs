@@ -474,6 +474,42 @@ test("an explicit --out is never pruned against", (t) => {
   assert.equal(readdirSync(dir).filter((f) => f.endsWith(".html")).length, 7);
 });
 
+test("the page counts every session in the window, not just the ones it details", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  // Three more sessions than the page will carry timelines for.
+  for (let i = 0; i < 3; i += 1) {
+    writeSession(root, {
+      id: `extra-${i}`,
+      entries: [prompt("go"), response({ id: `x${i}`, u: usage({ output: 1000, cacheRead: 5000 }), text: "reply" })],
+    });
+  }
+
+  const out = join(root, "page.html");
+  run(["browse", "--days", "7", "--limit", "1", "--no-open", "--no-audit", "--out", out, "--root", root]);
+  const payload = JSON.parse(/<script[^>]*id="data"[^>]*>([\s\S]*?)<\/script>/.exec(readFileSync(out, "utf8"))[1]);
+
+  // A page that totalled a subset while the report totalled the window is two
+  // surfaces disagreeing, which is the one thing this must not do.
+  assert.equal(payload.sessions.length, 4, "every session in the window is present");
+  assert.equal(payload.sessions.filter((s) => !s.trimmed).length, 1, "but only --limit of them carry a timeline");
+  assert.ok(payload.sessions.some((s) => s.trimmed && s.events.length === 0), "and a trimmed one carries no events");
+
+  const report = run(["report", "--days", "7", "--no-audit", "--root", root]).out;
+  assert.match(report, /4 sessions/, "which is what the report says too");
+  assert.equal(payload.summary.totals.sessions, 4);
+});
+
+test("--session still narrows to the one you asked for", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  writeSession(root, { id: "other-bbbb", entries: [prompt("x"), response({ id: "o1", u: usage({ output: 10 }), text: "y" })] });
+  const out = join(root, "one.html");
+  run(["browse", "--session", "sess-aaaa", "--no-open", "--no-audit", "--out", out, "--root", root]);
+  const payload = JSON.parse(/<script[^>]*id="data"[^>]*>([\s\S]*?)<\/script>/.exec(readFileSync(out, "utf8"))[1]);
+  assert.equal(payload.sessions.length, 1, "asking for one session means one session, not the window");
+});
+
 test("the page and the report quote the same figures", (t) => {
   const { root, cleanup } = populatedRoot();
   t.after(cleanup);
