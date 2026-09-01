@@ -80,7 +80,8 @@ if (has("help") || cmd === "help") {
     --tools           List every tool, not just the totals
 
   browse only
-    --limit <n>       Most recent N sessions, default 25
+    --limit <n>       Full timelines for the most recent N, default 25.
+                      Every session in the window is counted either way
     --session <id>    Just this one
     --out <file>      Where to write, default ~/.claude/marmot/
     --no-text         Leave prompt and response text out of the page
@@ -374,7 +375,7 @@ async function runBrowse() {
   // Pick the files first, newest last-modified first, so --limit means "the
   // sessions you actually worked in" rather than an arbitrary directory order.
   const since = new Date(Date.now() - DAYS * 86_400_000);
-  const picked = [...sessionFiles(ROOT)]
+  const inWindow = [...sessionFiles(ROOT)]
     .map((f) => {
       try {
         return { ...f, mtime: statSync(f.path).mtime };
@@ -384,18 +385,45 @@ async function runBrowse() {
     })
     .filter(Boolean)
     .filter((f) => (only ? f.id === only || f.id.startsWith(only) : f.mtime >= since))
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, only ? 1 : limit);
+    .sort((a, b) => b.mtime - a.mtime);
+  const picked = inWindow.slice(0, only ? 1 : limit);
 
-  if (!picked.length) {
+  if (!inWindow.length) {
     process.stderr.write(only ? `No session matching ${only}.\n` : `No sessions under ${ROOT}/projects in the last ${DAYS} days.\n`);
     return false;
   }
 
+  // Full timelines for the most recent sessions, and the cheap aggregate record
+  // for the rest. The page's figures are computed over *every* session in the
+  // window either way — a page that quietly totalled a subset while the report
+  // totalled the window is two surfaces disagreeing, which is the one thing
+  // this is not allowed to do.
+  const deep = new Set(picked.map((f) => f.path));
   const detailed = [];
   for (const f of picked) {
     const d = readSessionDetail(f.path, { rateOverrides: cfg.rateOverrides, caps });
     if (d) detailed.push(d);
+  }
+  if (!only) {
+    const { readSession } = await import("../src/sessions.mjs");
+    for (const f of inWindow) {
+      if (deep.has(f.path)) continue;
+      const a = readSession(f, { rateOverrides: cfg.rateOverrides });
+      if (!a) continue;
+      // Same shape, minus the part that costs megabytes.
+      detailed.push({
+        ...a,
+        title: null,
+        events: [],
+        trimmed: true,
+        toolCounts: a.toolCalls,
+        skillCounts: Object.fromEntries([...a.skills].map((k) => [k, 1])),
+        mcpCounts: a.mcpCalls,
+        filesTouched: [...a.filesTouched],
+        permissionModes: [...a.permissionModes],
+      });
+    }
+    detailed.sort((x, y) => (x.endedAt < y.endedAt ? 1 : -1));
   }
 
   // The page shows the same figures as the report, computed the same way over

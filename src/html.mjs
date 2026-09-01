@@ -513,6 +513,9 @@ function renderDetail(s){
       +kpi("Thinking",tok(t.thinking),"tokens")
       +kpi("Compactions",num(s.compactions),s.compactions?"":"no context reset")
     +'</div>'
+    +(s.trimmed
+      ? '<div class="panel"><h2>Timeline not included</h2><p class="cap">This session counts towards every figure on the front page. Its turn-by-turn timeline was left out to keep this file small — only the most recent sessions carry one, and all of them together would be three times the size. To read this one: <code>marmot browse --session '+esc(String(s.id).slice(0,8))+'</code></p></div>'
+      : "")
     +costTimeline(s)
     +tokenStack(t)
     +'<div class="cols">'

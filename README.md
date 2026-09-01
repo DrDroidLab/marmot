@@ -100,7 +100,7 @@ out, which is what you want in a script or a pre-commit hook.
 | `--json` | Machine-readable |
 | `--root DIR` | Claude Code home, default `~/.claude` |
 | `--session ID` | `browse`: just this one |
-| `--limit N` | `browse`: most recent N, default 25 |
+| `--limit N` | `browse`: full timelines for the most recent N, default 25 — every session in the window is counted either way |
 | `--no-text` | `browse`: counts and tool names only, no prompts |
 | `--browse` | Build and open the page even when output is piped |
 | `--no-browse` | Never build or open it |
@@ -114,6 +114,11 @@ output piped — from a script, a cron job, or a coding agent — and it stays i
 the terminal, because writing a multi-megabyte page and taking over the display
 is not what those callers asked for. `--browse` forces it either way,
 `--no-browse` never.
+
+Every session in the window is counted in the figures at the top. The
+turn-by-turn timelines are carried for the most recent 25 (`--limit`), because
+all of them together would be three times the size — open an older one and it
+says so, with the command to read just that session.
 
 Each run writes a **new file**, stamped to the minute, so the browser can never
 serve you a cached copy of an earlier one. The five most recent are kept and
