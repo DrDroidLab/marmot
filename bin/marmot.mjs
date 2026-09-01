@@ -46,6 +46,7 @@ if (has("help") || cmd === "help") {
     nudges            Only the nudges
     sessions          Every session in the window, one per line
     init              Write ${configPath(ROOT)} with the default thresholds
+    config            Open that thresholds file (creating it if it is missing)
     doctor            What is readable on this machine, and what is not
 
   Flags
@@ -54,6 +55,10 @@ if (has("help") || cmd === "help") {
     --json            Machine-readable output
     --demo            Run against synthetic sessions, not your own
     --statusline      With init: also install the statusline
+
+  config only
+    --print           Also print the file to the terminal
+    --no-open         Show the path, do not open it
 
   browse only
     --limit <n>       Most recent N sessions, default 25
@@ -92,6 +97,34 @@ if (cmd === "init") {
       settings.statusLine = { type: "command", command: `node ${here}`, padding: 0 };
       writeFileSync(sp, JSON.stringify(settings, null, 2) + "\n");
       process.stdout.write(`\nInstalled the statusline in ${sp}. It shows this session's cost, prompts and cache hit rate.\n`);
+    }
+  }
+  process.exit(0);
+}
+
+if (cmd === "config") {
+  // The thresholds file is optional — everything runs on the defaults without
+  // it. Create it on the way in, so "open the config" gives you something to
+  // edit rather than an empty buffer.
+  let created = false;
+  if (!existsSync(cfg._path)) {
+    const { _path, _exists, ...body } = { ...DEFAULTS };
+    writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
+    created = true;
+  }
+  process.stdout.write(`${cfg._path}${created ? "  (created, with the defaults)" : ""}\n`);
+  if (has("print")) process.stdout.write(`\n${readFileSync(cfg._path, "utf8")}`);
+
+  if (!has("no-open")) {
+    const { execFile, spawnSync } = await import("node:child_process");
+    const editor = process.env.VISUAL || process.env.EDITOR;
+    if (editor && process.stdout.isTTY) {
+      // A terminal editor needs a terminal. We only have one when stdout is a
+      // TTY — run from a slash command it is captured, and vim would hang.
+      spawnSync(editor, [cfg._path], { stdio: "inherit", shell: true });
+    } else {
+      const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+      execFile(opener, [cfg._path], () => {});
     }
   }
   process.exit(0);

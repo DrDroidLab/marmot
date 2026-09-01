@@ -88,6 +88,7 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/html.mjs` | The self-contained browser page (one template function). |
 | `src/demo.mjs` | Deterministic synthetic sessions for `--demo`. |
 | `bin/marmot.mjs` | CLI entry and command dispatch. |
+| `commands/*.md` | Slash commands. Auto-loaded — never declare them in `plugin.json`. |
 | `scripts/hook.mjs` | SessionStart digest + Stop live nudges. |
 | `scripts/statusline.mjs` | The statusline. Incremental file reads. |
 | `test/` | `node:test` suite. `npm test`. |
@@ -151,7 +152,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 153 tests, node:test, no dependencies
+npm test        # 157 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

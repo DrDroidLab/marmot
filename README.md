@@ -93,7 +93,7 @@ npm i -g @drdroidlab/marmot       # or keep it
 
 ### As a Claude Code plugin
 
-Adds `/usage` and `/sessions`, plus the nudges where you already are.
+Adds `/marmot:usage`, `/marmot:sessions` and `/marmot:config`, plus the nudges where you already are.
 
 ```
 /plugin marketplace add DrDroidLab/marmot
@@ -102,6 +102,7 @@ Adds `/usage` and `/sessions`, plus the nudges where you already are.
 
 Then **restart Claude Code** — hooks and commands load at session start.
 
+- **`/marmot:config`** — opens `~/.claude/marmot.json`, creating it with the defaults if you haven't got one, so you can move a cap without leaving Claude Code.
 - **Daily digest** — on your first session each day, what yesterday cost and what it flagged.
 - **Live nudges** — at the end of an assistant turn, only for the rules in `live`, once per session per rule. Cost rules speak again at each doubling. Everything else waits for the digest.
 
@@ -132,6 +133,7 @@ marmot browse --session 6d16e4fb
 marmot browse --no-text     # counts and tool names only, no prompts
 marmot doctor               # what's readable here, and what isn't
 marmot init                 # write the threshold file
+marmot config               # open the threshold file to edit
 marmot report --json        # everything, machine-readable
 ```
 
@@ -165,7 +167,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 153 tests, no dependencies, ~2s
+npm test        # 157 tests, no dependencies, ~2s
 ```
 
 ## Requirements

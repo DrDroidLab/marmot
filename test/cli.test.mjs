@@ -119,6 +119,53 @@ test("init writes the thresholds and refuses to clobber them", (t) => {
   assert.match(second.out, /already exists/);
 });
 
+test("config creates the thresholds file with the defaults when there is none", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const { out } = run(["config", "--no-open", "--root", root]);
+  assert.match(out, /marmot\.json/);
+  assert.match(out, /created/);
+
+  const cfg = JSON.parse(readFileSync(join(root, "marmot.json"), "utf8"));
+  assert.equal(cfg.session.turnCap, 20);
+  assert.ok(!("_path" in cfg) && !("_exists" in cfg), "internal fields stay out of the file");
+});
+
+test("config never clobbers thresholds you have already edited", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  writeFileSync(join(root, "marmot.json"), JSON.stringify({ session: { costCap: 500 } }, null, 2));
+
+  const { out } = run(["config", "--no-open", "--root", root]);
+  assert.ok(!out.includes("created"), "an existing file is opened, not rewritten");
+  assert.deepEqual(JSON.parse(readFileSync(join(root, "marmot.json"), "utf8")), { session: { costCap: 500 } });
+});
+
+test("config --print shows the file, and the path either way", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const quiet = run(["config", "--no-open", "--root", root]).out;
+  assert.ok(!quiet.includes("turnCap"), "without --print it is just the path");
+
+  const printed = run(["config", "--no-open", "--print", "--root", root]).out;
+  assert.match(printed, /"turnCap": 20/);
+  assert.match(printed, /marmot\.json/);
+  // Whatever it printed after the path must be the file, parseable as JSON.
+  const body = printed.slice(printed.indexOf("{"));
+  assert.doesNotThrow(() => JSON.parse(body));
+});
+
+test("the file config writes is one loadConfig accepts", async (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  run(["config", "--no-open", "--root", root]);
+  const { loadConfig } = await import("../src/config.mjs");
+  const cfg = loadConfig(root);
+  assert.equal(cfg._exists, true);
+  assert.equal(cfg.session.costCap, 25);
+  assert.deepEqual(cfg.live, ["session-cost", "daily-cost", "daily-baseline", "session-turns"]);
+});
+
 /* ── the browser page ──────────────────────────────────────────────────── */
 
 const buildPage = (root, extra = []) => {
