@@ -273,15 +273,22 @@ out, which is what you want in a script or a pre-commit hook.
 | `--session ID` | `browse`: just this one |
 | `--limit N` | `browse`: most recent N, default 25 |
 | `--no-text` | `browse`: counts and tool names only, no prompts |
-| `--no-browse` | Stay in the terminal; do not build or open the page |
+| `--browse` | Build and open the page even when output is piped |
+| `--no-browse` | Never build or open it |
 | `--no-audit` | Skip measuring MCP servers this run |
 | `--no-refresh` | Skip refreshing plan limits this run |
 
 ### Chasing a nudge to its source
 
-Every run builds the page and opens it — `--no-browse` keeps things in
-the terminal. Each run writes a **new file**, stamped to the minute, so the
-browser can never serve you a cached copy of an earlier one.
+Run `marmot` at a terminal and it builds the page and opens it. Run it with the
+output piped — from a script, a cron job, or a coding agent — and it stays in
+the terminal, because writing a multi-megabyte page and taking over the display
+is not what those callers asked for. `--browse` forces it either way,
+`--no-browse` never.
+
+Each run writes a **new file**, stamped to the minute, so the browser can never
+serve you a cached copy of an earlier one. The five most recent are kept and
+older ones removed — a page of 25 real sessions is a few megabytes.
 
 One self-contained HTML file, written locally — no CDN, no network, no web fonts.
 
