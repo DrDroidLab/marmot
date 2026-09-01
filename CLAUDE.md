@@ -133,6 +133,21 @@ Rules in `cfg.live` may interrupt mid-session; everything else waits for the dai
 digest. Cost rules re-fire at each doubling (`state.mjs`), all others once per
 session.
 
+## Installing
+
+The recommended route is the CLI, because the plugin has to be uninstalled and
+reinstalled to pick up any change:
+
+```bash
+npm install -g github:DrDroidLab/marmot   # no npm publish needed
+marmot init --hooks                       # SessionStart + Stop, into settings.json
+```
+
+`init --hooks` points the hook command at the *installed* copy's
+`scripts/hook.mjs`, so a global install is fully capable — the hooks are what
+deliver the nudges, and they are ordinary settings entries rather than something
+only a plugin can provide.
+
 ## Plugin gotchas
 
 Both of these fail **silently or obscurely** — they cost an afternoon each.

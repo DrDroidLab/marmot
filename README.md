@@ -5,7 +5,7 @@
 
 > **Alpha.** This is early software, and it reads a file format that is internal
 > and undocumented — a Claude Code update can break a metric. Running
-> `node bin/marmot.mjs doctor` shows what's still readable on your machine.
+> `marmot doctor` shows what's still readable on your machine.
 > Bugs and ideas are welcome, in
 > [issues](https://github.com/DrDroidLab/marmot/issues) or on
 > [Discord](https://discord.gg/AQ3tusPtZn).
@@ -28,45 +28,39 @@ Node 18+, zero dependencies, entirely local. Works on **all Claude plans**.
 
 ## Install
 
-**As a Claude Code plugin** — the way to run it, and the only way the
-mid-session nudges can reach you at all.
-
-```
-/plugin marketplace add DrDroidLab/marmot
-/plugin install marmot@marmot
+```bash
+npm install -g github:DrDroidLab/marmot   # installs the `marmot` command
+marmot init --hooks                       # wires up the nudges
 ```
 
-Then **restart Claude Code** — hooks and commands only load at session start. You get:
+Then **restart Claude Code**, and check it took:
+
+```bash
+marmot doctor
+```
+
+Nothing is published to npm yet — npm installs straight from the repository, and
+there are no dependencies to fetch, so it takes a few seconds. `marmot` is then
+on your PATH for every terminal and every coding-agent session on the machine.
+
+> **Installing this with a coding agent?** Give it the two commands above. The
+> first puts `marmot` on the PATH; the second writes `SessionStart` and `Stop`
+> hooks into `~/.claude/settings.json` pointing at the installed copy. Both are
+> idempotent — re-running leaves an existing install alone unless you pass
+> `--force`, and hooks belonging to anything else are never touched.
+
+What the hooks give you:
 
 - **Live nudges** at the end of a turn, for the rules in `live` — the ones you
   can still act on. Once per rule, again at each doubling for cost, with a bell
   and a desktop notification so they do not scroll past.
 - **A daily digest** on your first session each day: what yesterday cost, and
   what it flagged.
-- `/marmot:usage` — everything, on demand.
-- `/marmot:config` — move a threshold.
 
-Check it loaded — the status line, not the component count:
+**The statusline** is a separate opt-in, since it replaces whatever you have:
 
 ```bash
-claude plugin list | grep -A4 'marmot@'    # Status: ✔ enabled
-```
-
-**As a CLI**, for the commands the plugin does not expose — `mcp-audit`,
-`doctor`, `nudges`, `sessions`:
-
-```bash
-git clone https://github.com/DrDroidLab/marmot && cd marmot
-node bin/marmot.mjs --demo      # see the nudges on synthetic data
-node bin/marmot.mjs             # then on your own
-```
-
-No install step and no dependencies to fetch — it is plain Node.
-
-**The statusline** — plugins can't ship one, so it's a separate opt-in.
-
-```bash
-node bin/marmot.mjs init --statusline
+marmot init --statusline
 ```
 
 ```
@@ -75,6 +69,19 @@ $12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
 
 The `▲` appears once you're past your own caps — the cheapest possible reminder,
 always in view.
+
+**As a Claude Code plugin**, if you would rather have `/marmot:usage` and
+`/marmot:config` as slash commands. It carries the same hooks, so do not install
+both sets:
+
+```
+/plugin marketplace add DrDroidLab/marmot
+/plugin install marmot@marmot
+```
+
+Restart Claude Code afterwards — plugin state only loads at session start. Note
+that picking up a new version means uninstalling and reinstalling, which is the
+main reason the CLI is the recommended route.
 
 ---
 
@@ -212,23 +219,21 @@ other, wrong for finance.
 
 ## Usage
 
-Two commands inside Claude Code; everything else runs from the clone. There is
-no `marmot` on your PATH yet — it is `node bin/marmot.mjs <command>`.
+| Command | What it does |
+|---|---|
+| `marmot` | Nudges, plus the window they came from |
+| `marmot config` | Open the thresholds file |
+| `marmot browse` | Build the session browser page and open it |
+| `marmot nudges` | Just the nudges, nothing else |
+| `marmot sessions` | One line per session |
+| `marmot mcp-audit` | Measure what each MCP server's tool definitions cost |
+| `marmot doctor` | What's readable on this machine, and what isn't |
+| `marmot init` | Write the thresholds file; `--hooks` and `--statusline` install those |
 
-| Command | Slash command | What it does |
-|---|---|---|
-| `node bin/marmot.mjs` | `/marmot:usage` | Nudges, plus the window they came from |
-| `node bin/marmot.mjs config` | `/marmot:config` | Open the thresholds file |
-| `node bin/marmot.mjs browse` | | Build the session browser page and open it |
-| `node bin/marmot.mjs nudges` | | Just the nudges, nothing else |
-| `node bin/marmot.mjs sessions` | | One line per session |
-| `node bin/marmot.mjs mcp-audit` | | Measure what each MCP server's tool definitions cost |
-| `node bin/marmot.mjs doctor` | | What's readable on this machine, and what isn't |
-| `node bin/marmot.mjs init` | | Write the thresholds file |
-
-`/marmot:usage` is the one to reach for, and the flags below pass straight
-through it — `/marmot:usage --days 7`. `nudges` is the same findings with the
+`marmot` is the one to reach for. `nudges` is the same findings with the
 reporting stripped out, which is what you want in a script or a pre-commit hook.
+With the plugin installed, `/marmot:usage` and `/marmot:config` do the first two
+from inside Claude Code.
 
 | Flag | |
 |---|---|
@@ -265,7 +270,7 @@ on *every* request rather than once. Nothing on disk records how big those tool
 definitions are, so Marmot asks the servers directly:
 
 ```bash
-node bin/marmot.mjs mcp-audit
+marmot mcp-audit
 ```
 
 ```
@@ -293,8 +298,8 @@ most of your sessions it is describing how you work rather than flagging
 anything, and it should be raised, not ignored.
 
 ```bash
-node bin/marmot.mjs config          # opens ~/.claude/marmot.json, creating it if you have none
-node bin/marmot.mjs config --print  # ...and print it to the terminal
+marmot config          # opens ~/.claude/marmot.json, creating it if you have none
+marmot config --print  # ...and print it to the terminal
 ```
 
 or `/marmot:config` inside Claude Code. Nothing needs restarting — the next run
