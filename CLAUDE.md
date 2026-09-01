@@ -135,8 +135,10 @@ session.
 
 ## Installing
 
-The recommended route is the CLI, because the plugin has to be uninstalled and
-reinstalled to pick up any change:
+The CLI is the install. The plugin still exists in `commands/` and
+`.claude-plugin/`, but it is no longer documented: it has to be uninstalled and
+reinstalled to pick up any change, which made it the wrong thing to put in front
+of anyone.
 
 ```bash
 npm install -g github:DrDroidLab/marmot   # no npm publish needed

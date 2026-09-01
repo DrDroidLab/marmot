@@ -70,19 +70,6 @@ $12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
 The `▲` appears once you're past your own caps — the cheapest possible reminder,
 always in view.
 
-**As a Claude Code plugin**, if you would rather have `/marmot:usage` and
-`/marmot:config` as slash commands. It carries the same hooks, so do not install
-both sets:
-
-```
-/plugin marketplace add DrDroidLab/marmot
-/plugin install marmot@marmot
-```
-
-Restart Claude Code afterwards — plugin state only loads at session start. Note
-that picking up a new version means uninstalling and reinstalling, which is the
-main reason the CLI is the recommended route.
-
 ---
 
 ## What it catches
@@ -230,10 +217,9 @@ other, wrong for finance.
 | `marmot doctor` | What's readable on this machine, and what isn't |
 | `marmot init` | Write the thresholds file; `--hooks` and `--statusline` install those |
 
-`marmot` is the one to reach for. `nudges` is the same findings with the
-reporting stripped out, which is what you want in a script or a pre-commit hook.
-With the plugin installed, `/marmot:usage` and `/marmot:config` do the first two
-from inside Claude Code.
+`marmot` is the one to reach for, and every flag below works on it —
+`marmot --days 7`. `nudges` is the same findings with the reporting stripped
+out, which is what you want in a script or a pre-commit hook.
 
 | Flag | |
 |---|---|
@@ -302,12 +288,12 @@ marmot config          # opens ~/.claude/marmot.json, creating it if you have no
 marmot config --print  # ...and print it to the terminal
 ```
 
-or `/marmot:config` inside Claude Code. Nothing needs restarting — the next run
-reads it.
+Nothing needs restarting — the next run reads it.
 
 It opens in a real text editor rather than a preview — `$VISUAL`/`$EDITOR`, else
 the platform default. A terminal editor like vim is used only where there is a
-terminal to attach it to, so `/marmot:config` opens a window instead of hanging.
+terminal to attach it to, so a non-interactive run opens a window rather than
+hanging on an editor with nothing to attach to.
 
 ### What Claude Code says is eating your limits
 
