@@ -139,6 +139,10 @@ export const DEFAULTS = {
     persist: true,
   },
 
+  // Each run writes a new page, so the browser can never show you a cached
+  // older one. This is how many are kept before the oldest are removed.
+  browse: { keep: 5 },
+
   cache: { minHitRate: 0.7, minTurns: 20 },
   toolErrors: { maxRate: 0.1, minCalls: 20 },
   mcp: {

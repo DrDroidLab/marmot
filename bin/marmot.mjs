@@ -427,6 +427,24 @@ async function runBrowse() {
   const html = buildHtml(detailed, { days: DAYS, root: ROOT, redacted, summary });
   writeFileSync(out, html);
 
+  // A new file per run means the browser can never serve a cached older one —
+  // but left alone that is a directory quietly filling with megabytes. Keep the
+  // most recent few and drop the rest.
+  if (!flag("out", null)) {
+    try {
+      const { readdirSync, unlinkSync } = await import("node:fs");
+      const keep = Math.max(1, cfg.browse?.keep ?? 5);
+      readdirSync(outDir)
+        .filter((f) => /^sessions-.*\.html$/.test(f))
+        .map((f) => ({ f, at: statSync(join(outDir, f)).mtimeMs }))
+        .sort((a, b) => b.at - a.at)
+        .slice(keep)
+        .forEach((old) => unlinkSync(join(outDir, old.f)));
+    } catch {
+      /* tidying is a courtesy, never a reason to fail the page */
+    }
+  }
+
   const mb = (Buffer.byteLength(html) / 1024 / 1024).toFixed(1);
   process.stdout.write(`Wrote ${out}  (${detailed.length} sessions, ${mb} MB)\n`);
   if (!redacted) {

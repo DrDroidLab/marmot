@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpRoot, writeSession, prompt, toolUse, response, usage } from "./helpers.mjs";
@@ -430,6 +430,39 @@ test("the page's inline script parses, and its data payload is valid JSON", asyn
     }
   }
   assert.ok(sawJson && sawCode, "expected both a JSON payload and executable script");
+});
+
+test("old pages are pruned, so the directory cannot fill up", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const dir = join(root, "marmot");
+  mkdirSync(dir, { recursive: true });
+  // Seven earlier runs, oldest first.
+  for (let i = 0; i < 7; i += 1) {
+    const f = join(dir, `sessions-2026-08-0${i + 1}-10-00.html`);
+    writeFileSync(f, "old");
+    utimesSync(f, new Date(Date.now() - (10 - i) * 86_400_000), new Date(Date.now() - (10 - i) * 86_400_000));
+  }
+  writeFileSync(join(dir, "keep-me.txt"), "not ours");
+
+  run(["browse", "--days", "7", "--no-open", "--no-audit", "--root", root]);
+
+  const left = readdirSync(dir).filter((f) => f.endsWith(".html"));
+  assert.equal(left.length, 5, `kept ${left.length}: ${left.join(", ")}`);
+  assert.ok(!left.includes("sessions-2026-08-01-10-00.html"), "the oldest went first");
+  assert.ok(readdirSync(dir).includes("keep-me.txt"), "and nothing that is not ours is touched");
+});
+
+test("an explicit --out is never pruned against", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const dir = join(root, "marmot");
+  mkdirSync(dir, { recursive: true });
+  for (let i = 0; i < 7; i += 1) writeFileSync(join(dir, `sessions-2026-08-0${i + 1}-10-00.html`), "old");
+
+  // Writing somewhere you named is not a managed run; leave the rest alone.
+  run(["browse", "--days", "7", "--no-open", "--no-audit", "--out", join(root, "mine.html"), "--root", root]);
+  assert.equal(readdirSync(dir).filter((f) => f.endsWith(".html")).length, 7);
 });
 
 test("the page and the report quote the same figures", (t) => {
