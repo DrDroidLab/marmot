@@ -260,10 +260,11 @@ if (cmd === "config") {
 
 if (cmd === "mcp-audit") {
   const { readServerConfigs, auditServers, auditPath } = await import("../src/mcp.mjs");
-  const configs = readServerConfigs(ROOT, process.cwd());
+  const { loadSessions: load, sessionDirs: dirsOf } = await import("../src/sessions.mjs");
+  const configs = readServerConfigs(ROOT, [...dirsOf(load({ root: ROOT, days: DAYS })), process.cwd()]);
   const names = Object.keys(configs);
   if (!names.length) {
-    process.stdout.write(`No MCP servers configured in ${ROOT}/mcp.json, ${ROOT}/settings.json or ./.mcp.json\n`);
+    process.stdout.write(`No MCP servers configured for this machine or the projects in this window.\n`);
     process.exit(0);
   }
 
@@ -399,24 +400,27 @@ async function runBrowse() {
   // The page shows the same figures as the report, computed the same way over
   // the same records — a detail record is a superset of a session record, so
   // `totals` and the rules read it without knowing which reader produced it.
-  const { configuredServers } = await import("../src/sessions.mjs");
-  const sizes = await mcpSizes();
+  const { configuredServers, sessionDirs } = await import("../src/sessions.mjs");
+  const dirs = [...sessionDirs(detailed), process.cwd()];
+  const sizes = await mcpSizes(dirs);
+  const { byProject } = await import("../src/sessions.mjs");
   const summary = {
     totals: totals(detailed),
+    projects: byProject(detailed, { servers: has("demo") ? {} : (await import("../src/mcp.mjs")).readServerConfigs(ROOT, dirs) }),
     plan: has("demo") ? null : await readPlanFresh(),
     nudges: evaluate(detailed, cfg, {
       root: ROOT,
       cwd: process.cwd(),
       mcpSizes: sizes,
       plan: has("demo") ? null : (await import("../src/plan.mjs")).readPlan(ROOT),
-      configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : undefined,
+      configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, dirs),
     }),
     skills: (await import("../src/skills.mjs")).skillCosts(
       totals(detailed).skills,
       has("demo") ? (await import("../src/demo.mjs")).demoSkillSizes : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() }),
     ),
     mcp: sizes?.servers ?? {},
-    configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, process.cwd()),
+    configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, dirs),
   };
 
   const outDir = join(ROOT, "marmot");
@@ -481,7 +485,7 @@ const DEMO = has("demo");
  * server costs is only half a nudge. Measuring starts each server, so it is
  * cached for a week and announces itself while it runs.
  */
-async function mcpSizes() {
+async function mcpSizes(dirs = []) {
   if (has("demo")) return { servers: { datadog: { count: 22, tokens: 3600 } } };
   const { readAudit, readServerConfigs, auditServers, auditPath } = await import("../src/mcp.mjs");
 
@@ -490,7 +494,7 @@ async function mcpSizes() {
   if (saved && ageDays < cfg.mcp.auditMaxAgeDays) return saved;
   if (!cfg.mcp.enabled || !cfg.mcp.autoAudit || has("no-audit")) return saved;
 
-  const configs = readServerConfigs(ROOT, process.cwd());
+  const configs = readServerConfigs(ROOT, [...dirs, process.cwd()]);
   const names = Object.keys(configs);
   if (!names.length) return saved;
 
@@ -513,7 +517,12 @@ async function mcpSizes() {
   return out;
 }
 
-const MCP_SIZES = await mcpSizes();
+// Every directory the window's sessions ran in. Using these rather than the
+// one you happen to be standing in is what makes the report identical from
+// anywhere on the machine.
+const { configuredServers, sessionDirs } = await import("../src/sessions.mjs");
+const WINDOW_DIRS = DEMO ? [] : [...sessionDirs(sessions), process.cwd()];
+const MCP_SIZES = await mcpSizes(WINDOW_DIRS);
 
 /**
  * The plan, with its limits actually current. A reading whose window has reset
@@ -544,9 +553,8 @@ const nudges = evaluate(sessions, cfg, {
   plan: PLAN,
   attribution: ATTRIBUTION,
   cwd: DEMO ? null : process.cwd(),
+  configured: DEMO ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, WINDOW_DIRS),
   mcpSizes: MCP_SIZES,
-  // Demo runs must not read this machine's MCP config, or the demo reports on you.
-  configured: DEMO ? ["github", "sentry", "postgres", "datadog"] : undefined,
 });
 
 if (cmd === "doctor") {
@@ -655,8 +663,9 @@ if (cmd === "sessions") {
 const SKILL_SIZES = DEMO
   ? (await import("../src/demo.mjs")).demoSkillSizes
   : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
-const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : (await import("../src/sessions.mjs")).configuredServers(ROOT, process.cwd());
-process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN, attribution: ATTRIBUTION }));
+const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, WINDOW_DIRS);
+const SERVER_CONFIGS = DEMO ? {} : (await import("../src/mcp.mjs")).readServerConfigs(ROOT, WINDOW_DIRS);
+process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN, attribution: ATTRIBUTION, serverConfigs: SERVER_CONFIGS }));
 
 // `--sessions` adds every session under the report; the page follows unless
 // `--no-browse`. One command, the numbers and somewhere to dig in.

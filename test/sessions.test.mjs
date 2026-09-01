@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync, utimesSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { readSession, loadSessions, sessionFiles, configuredServers, byDay } from "../src/sessions.mjs";
+import { readSession, loadSessions, sessionFiles, configuredServers, byDay, byProject, sessionDirs } from "../src/sessions.mjs";
 import { tmpRoot, writeSession, writeRaw, prompt, notPrompt, toolResult, toolUse, response, usage, compaction } from "./helpers.mjs";
 
 const read = (root, f) => readSession(f);
@@ -491,4 +491,63 @@ test("configuredServers is empty when nothing is configured", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
   assert.deepEqual(configuredServers(root), []);
+});
+
+/* ── one row per setup ─────────────────────────────────────────────────── */
+
+const proj = (cwd, cost, prompts) => ({
+  cwd,
+  cost,
+  typedPrompts: prompts,
+  assistantTurns: prompts * 10,
+  tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 },
+});
+
+test("byProject rolls sessions up per working directory, dearest first", () => {
+  const rows = byProject([proj("/a", 10, 5), proj("/b", 30, 2), proj("/a", 5, 3)]);
+  assert.deepEqual(rows.map((r) => [r.dir, r.cost, r.sessions, r.prompts]), [
+    ["/b", 30, 1, 2],
+    ["/a", 15, 2, 8],
+  ]);
+});
+
+test("byProject names the servers scoped to each directory, not the global ones", () => {
+  // The project-only servers are the part of a setup you cannot see from
+  // anywhere else, which is the reason to show the split at all.
+  const rows = byProject([proj("/a", 10, 5), proj("/b", 5, 1)], {
+    servers: {
+      github: { _scope: "global" },
+      context7: { _scope: "/a" },
+      sprinto: { _scope: "/b" },
+    },
+  });
+  assert.deepEqual(rows.find((r) => r.dir === "/a").scoped, ["context7"]);
+  assert.deepEqual(rows.find((r) => r.dir === "/b").scoped, ["sprinto"]);
+});
+
+test("a session with no working directory still lands somewhere", () => {
+  assert.equal(byProject([proj(null, 3, 1)])[0].dir, "(unknown)");
+});
+
+test("sessionDirs is every distinct directory in the window", () => {
+  assert.deepEqual(sessionDirs([proj("/a", 1, 1), proj("/b", 1, 1), proj("/a", 1, 1), proj(null, 1, 1)]).sort(), ["/a", "/b"]);
+  assert.deepEqual(sessionDirs([]), []);
+});
+
+test("configured servers are the same from any directory in the window", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const home = join(root, "home");
+  const claude = join(home, ".claude");
+  mkdirSync(claude, { recursive: true });
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({
+    mcpServers: { everywhere: {} },
+    projects: { "/work/one": { mcpServers: { onlyOne: {} } }, "/work/two": { mcpServers: { onlyTwo: {} } } },
+  }));
+
+  // Standing in one project must not hide the other project's servers, or the
+  // same window reports differently depending on where you ran it.
+  const dirs = ["/work/one", "/work/two"];
+  assert.deepEqual(configuredServers(claude, dirs).sort(), ["everywhere", "onlyOne", "onlyTwo"]);
+  assert.deepEqual(configuredServers(claude, ["/work/one"]).sort(), ["everywhere", "onlyOne"]);
 });

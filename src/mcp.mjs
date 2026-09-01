@@ -25,14 +25,19 @@ const CLIENT = { name: "marmot", version: "0.1.0" };
  * Every configured server with its full config, not just its name.
  *
  * Four places, and `~/.claude.json` is the one that matters most — it holds
- * both the global servers and a per-project set under `projects[cwd]`. Reading
- * only `~/.claude/mcp.json` found 3 of the 10 servers on the machine this was
- * written on, which made the idle-server nudge quietly useless.
+ * both the global servers and a per-project set under `projects[cwd]`.
+ *
+ * `cwds` is every working directory worth considering, not just the one you
+ * happen to be standing in. Passing the directories of the sessions in the
+ * window is what makes the answer the same from anywhere on the machine: a
+ * server attached in the repo you worked in all week is attached for those
+ * sessions whether or not you `cd` there before running this.
  */
-export function readServerConfigs(root, cwd = null) {
+export function readServerConfigs(root, cwds = null) {
+  const dirs = (Array.isArray(cwds) ? cwds : [cwds]).filter(Boolean);
   const out = {};
-  const take = (servers) => {
-    for (const [name, cfg] of Object.entries(servers ?? {})) out[name] ??= cfg;
+  const take = (servers, scope) => {
+    for (const [name, cfg] of Object.entries(servers ?? {})) out[name] ??= { ...cfg, _scope: scope };
   };
   const read = (p) => {
     if (!existsSync(p)) return null;
@@ -43,15 +48,16 @@ export function readServerConfigs(root, cwd = null) {
     }
   };
 
-  take(read(join(root, "mcp.json"))?.mcpServers);
-  take(read(join(root, "settings.json"))?.mcpServers);
+  take(read(join(root, "mcp.json"))?.mcpServers, "global");
+  take(read(join(root, "settings.json"))?.mcpServers, "global");
 
   // `~/.claude.json` sits beside the directory, not inside it.
   const main = read(`${root}.json`);
-  take(main?.mcpServers);
-  if (cwd) take(main?.projects?.[cwd]?.mcpServers);
-
-  if (cwd) take(read(join(cwd, ".mcp.json"))?.mcpServers);
+  take(main?.mcpServers, "global");
+  for (const dir of dirs) {
+    take(main?.projects?.[dir]?.mcpServers, dir);
+    take(read(join(dir, ".mcp.json"))?.mcpServers, dir);
+  }
   return out;
 }
 

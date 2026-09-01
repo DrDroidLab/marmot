@@ -319,6 +319,18 @@ function summaryPanels(){
   var Z=D.summary; if(!Z||!Z.totals) return "";
   var M=Z.totals, out="";
 
+  var P=Z.projects||[];
+  if(P.length>1){
+    var maxCost=P[0].cost||1;
+    out+='<div class="panel"><h2>By project</h2><p class="cap">Each working directory is its own setup, with its own MCP servers and skills. Every nudge below is computed across all of them.</p><div class="barlist">'
+      +P.map(function(r){
+        var w=maxCost?(r.cost/maxCost*100):0;
+        var name=r.dir.split("/").slice(-2).join("/");
+        return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"></u><s>'+esc(name)+(r.scoped&&r.scoped.length?" · +"+esc(r.scoped.join(", ")):"")+'</s></div>'
+          +'<div class="ct">'+usd(r.cost)+" · "+num(r.sessions)+" sess · "+num(r.prompts)+' prompts</div></div>';
+      }).join("")+'</div></div>';
+  }
+
   var days=seriesByDay();
   out+=stackedByDay("Model tokens by day","Which model the window's tokens went to, day by day.",days,topKeys(days,"models",6),function(d,k){return d.models[k];});
   out+=stackedByDay("Skills by day","How often each skill loaded. A habit looks different from a one-off.",days,topKeys(days,"skills",6),function(d,k){return d.skills[k];});

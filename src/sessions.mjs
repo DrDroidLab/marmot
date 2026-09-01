@@ -248,8 +248,38 @@ export function loadSessions({ root = defaultRoot(), days = 30, rateOverrides } 
  * lives in `mcp.mjs` so the nudge and `marmot mcp-audit` always agree on which
  * servers exist.
  */
-export function configuredServers(root = defaultRoot(), cwd = null) {
-  return Object.keys(readServerConfigs(root, cwd));
+export function configuredServers(root = defaultRoot(), cwds = null) {
+  return Object.keys(readServerConfigs(root, cwds));
+}
+
+/** Every working directory the window's sessions ran in, newest first. */
+export const sessionDirs = (sessions = []) => [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
+
+/**
+ * One row per working directory, dearest first.
+ *
+ * Each directory is its own Claude Code setup — its own MCP servers, its own
+ * project skills, often its own habits. The nudges are deliberately computed
+ * across all of them, because a limit is spent from one pool whichever repo
+ * emptied it.
+ */
+export function byProject(sessions, { servers = {} } = {}) {
+  const rows = {};
+  for (const s of sessions) {
+    const dir = s.cwd ?? "(unknown)";
+    const r = (rows[dir] ??= { dir, cost: 0, sessions: 0, prompts: 0, turns: 0, tokens: 0, scoped: [] });
+    r.cost += s.cost;
+    r.sessions += 1;
+    r.prompts += s.typedPrompts;
+    r.turns += s.assistantTurns;
+    r.tokens += s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite;
+  }
+  // Servers attached only for this directory, which is the part of a setup that
+  // is invisible from anywhere else.
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (cfg?._scope && cfg._scope !== "global" && rows[cfg._scope]) rows[cfg._scope].scoped.push(name);
+  }
+  return Object.values(rows).sort((a, b) => b.cost - a.cost);
 }
 
 /** Spend per calendar day, oldest first. */

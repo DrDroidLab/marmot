@@ -236,6 +236,26 @@ reading past its window shows as `—` rather than as a number.
 Subscription plans return no dollar value for a limit, which is exactly why
 percent is the unit.
 
+Below that it splits by **project** — each working directory is its own Claude
+Code setup, with its own MCP servers and skills:
+
+```
+  By project · 7 setups
+  /Users/you/code/platform            $1,128    7 sess   269 prompts  +sprinto
+  /Users/you/code/payments-api          $438    5 sess    74 prompts
+  /Users/you/code/aiops                 $188    2 sess    58 prompts  +context7
+                                        every nudge below is across all of them
+```
+
+`+name` marks a server attached only in that directory — the part of a setup
+that is invisible from anywhere else. The **nudges are deliberately not split**:
+a plan limit is spent from one pool, whichever repo emptied it.
+
+Every figure is the same wherever you run `marmot` from. It reads the whole of
+`~/.claude/projects`, and works out which MCP servers were attached from the
+directories of the sessions **in the window** rather than from wherever you
+happen to be standing — so `cd`-ing somewhere else cannot change the answer.
+
 **Baseline context** is what every request carries before you type — system
 prompt, skill descriptions, every attached tool definition — and it is what
 makes an idle server legible as a cost rather than a checkbox.

@@ -1,10 +1,12 @@
-import { byDay } from "./sessions.mjs";
+import { byDay, byProject } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins, dim, bold, warn, info } from "./format.mjs";
 import { skillCosts } from "./skills.mjs";
 
 const SHADOW_API =
   "These are published API rates, which is what pay-as-you-go usage actually costs.";
 const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+/** A path short enough to line up, keeping the end that identifies it. */
+const short = (p, n = 46) => (p.length <= n ? p : `…${p.slice(-(n - 1))}`);
 const resetIn = (iso) => {
   const m = (Date.parse(iso) - Date.now()) / 60_000;
   return Number.isFinite(m) ? (m <= 0 ? "shortly" : `in ${mins(m)}`) : "soon";
@@ -74,7 +76,7 @@ export function renderSessionList(sessions, { heading = false } = {}) {
   return out.join("\n");
 }
 
-export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null, attribution = null }) {
+export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null, attribution = null, serverConfigs = {} }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"
     : "everything below was read from ~/.claude/projects on this machine";
@@ -190,6 +192,23 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
         dim(`  ${"".padEnd(w)}  ${num(total)} tokens on every request`) + (idle ? warn(`, ${num(idle)} of them idle`) : ""),
       );
     }
+  }
+
+  // Each working directory is its own setup — its own servers, its own skills,
+  // often its own habits. Worth seeing the split; not worth splitting the
+  // nudges, which are about a pool spent from all of them at once.
+  const projects = byProject(sessions, { servers: serverConfigs });
+  if (projects.length > 1) {
+    out.push("");
+    out.push(bold(`  By project · ${projects.length} setups`));
+    const w = Math.min(46, Math.max(...projects.map((r) => short(r.dir).length)));
+    for (const r of projects) {
+      out.push(
+        `  ${short(r.dir).padEnd(w)}  ${usd(r.cost).padStart(9)}  ${String(r.sessions).padStart(3)} sess  ${String(r.prompts).padStart(4)} prompts  ` +
+          dim(r.scoped.length ? `+${r.scoped.join(", ")}` : ""),
+      );
+    }
+    out.push(dim(`  ${"".padEnd(w)}  every nudge below is across all of them`));
   }
 
   // Claude Code's own accounting, which beats anything inferred from
