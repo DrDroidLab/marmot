@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readPlan, planName, paysPerToken, tightestLimit } from "../src/plan.mjs";
+import { readPlan, planName, paysPerToken, tightestLimit, usableLimits, limitsExpired, worthRefreshing, refreshUsage } from "../src/plan.mjs";
 import { windowRules, limitSteps, sessionRules, evaluate } from "../src/rules.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { tmpRoot } from "./helpers.mjs";
@@ -247,4 +247,112 @@ test("evaluate passes the plan down to the session rules", () => {
   const onApi = evaluate(bigDay, DEFAULTS, { ...opts({ plan: "API", limits: [] }) });
   assert.equal(onMax.sessionNudges.find((g) => g.id === "session-cost"), undefined);
   assert.ok(onApi.sessionNudges.find((g) => g.id === "session-cost"));
+});
+
+/* ── expired windows, and refreshing them ──────────────────────────────── */
+
+const withResets = (sessionResetsIn, weeklyResetsIn) => ({
+  fetchedAtMs: Date.now(),
+  utilization: {
+    limits: [
+      { kind: "session", percent: 5, resets_at: new Date(Date.now() + sessionResetsIn).toISOString(), is_active: true },
+      { kind: "weekly_all", percent: 19, resets_at: new Date(Date.now() + weeklyResetsIn).toISOString(), is_active: true },
+    ],
+  },
+});
+
+test("a reading whose window has reset is expired, not merely stale", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const claude = join(root, ".claude");
+  // Both windows rolled over hours ago: 5% describes a window nobody is in.
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: withResets(-3 * 3_600_000, -1 * 3_600_000) });
+
+  const p = readPlan(claude, { env: {} });
+  assert.deepEqual(p.limits.map((l) => l.expired), [true, true]);
+  assert.deepEqual(usableLimits(p), [], "nothing here is worth acting on");
+  assert.equal(limitsExpired(p), true);
+});
+
+test("a live window is usable, and its reading stands", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const claude = join(root, ".claude");
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: withResets(2 * 3_600_000, 4 * 86_400_000) });
+
+  const p = readPlan(claude, { env: {} });
+  assert.equal(limitsExpired(p), false);
+  assert.equal(usableLimits(p).length, 2);
+});
+
+test("an expired reading never fires a nudge, however high it looks", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const claude = join(root, ".claude");
+  const dead = withResets(-3_600_000, -3_600_000);
+  dead.utilization.limits[1].percent = 95; // would be well past every mark
+  writeAccount(claude, { oauthAccount: { organizationRateLimitTier: "default_claude_max_20x" }, cachedUsageUtilization: dead });
+
+  const plan = readPlan(claude, { env: {} });
+  const out = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan });
+  assert.equal(out.filter((w) => w.id === "limit-reached").length, 0, "a dead window says nothing about the live one");
+});
+
+test("worthRefreshing is true exactly when the cache cannot answer", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const claude = join(root, ".claude");
+
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: withResets(2 * 3_600_000, 4 * 86_400_000) });
+  assert.equal(worthRefreshing(readPlan(claude, { env: {} })), false, "live and recent");
+
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: withResets(-3_600_000, -3_600_000) });
+  assert.equal(worthRefreshing(readPlan(claude, { env: {} })), true, "windows have reset");
+
+  const old = withResets(2 * 3_600_000, 4 * 86_400_000);
+  old.fetchedAtMs = Date.now() - 5 * 3_600_000;
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: old });
+  assert.equal(worthRefreshing(readPlan(claude, { env: {} })), true, "hours old");
+
+  writeAccount(claude, { oauthAccount: {} });
+  assert.equal(worthRefreshing(readPlan(claude, { env: {} })), true, "no snapshot at all");
+});
+
+test("refreshUsage asks Claude Code, and never throws when it cannot", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const claude = join(root, ".claude");
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: withResets(-3_600_000, -3_600_000) });
+
+  // The command it runs is Claude Code's own, which is client-side and free.
+  let called = null;
+  refreshUsage(claude, { env: {}, run: (cmd, args) => { called = [cmd, ...args]; } });
+  assert.deepEqual(called, ["claude", "-p", "/usage"]);
+
+  const failed = refreshUsage(claude, { env: {}, run: () => { throw new Error("no claude on PATH"); } });
+  assert.equal(failed.refreshed, false);
+  assert.match(failed.reason, /could not run/);
+});
+
+test("refreshUsage reports whether the snapshot actually moved", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const claude = join(root, ".claude");
+  writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: withResets(-3_600_000, -3_600_000) });
+
+  // A run that changes nothing is not a refresh, and must not be reported as one.
+  assert.equal(refreshUsage(claude, { env: {}, run: () => {} }).refreshed, false);
+
+  // One that writes a newer snapshot is. The timestamp has to differ, or two
+  // writes inside the same millisecond look like no change at all.
+  const moved = refreshUsage(claude, {
+    env: {},
+    run: () => {
+      const fresh = withResets(2 * 3_600_000, 4 * 86_400_000);
+      fresh.fetchedAtMs = Date.now() + 5_000;
+      writeAccount(claude, { oauthAccount: {}, cachedUsageUtilization: fresh });
+    },
+  });
+  assert.equal(moved.refreshed, true);
+  assert.equal(limitsExpired(moved.plan), false);
 });

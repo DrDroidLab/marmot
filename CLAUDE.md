@@ -151,7 +151,13 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    through literally and became "your last NaN days". `posInt()` in the CLI now
    guards this, but don't reintroduce the pattern.
 
-4. **A quiet-hours setting suppresses every notification, from every app.**
+4. **`claude -p "/usage"` refreshes the usage snapshot for free.** It is handled
+   client-side: no model turn, no session, no transcript — measured at zero
+   tokens. That is why `src/plan.mjs` shells out to it rather than reading the
+   OAuth token out of the Keychain and calling an undocumented endpoint, which
+   was the first design and a much worse one.
+
+5. **A quiet-hours setting suppresses every notification, from every app.**
    macOS Focus, Windows Do Not Disturb / Focus assist, GNOME and KDE Do Not
    Disturb. Six notifications were debugged here — attribution, bundle ids,
    permissions, the lot — before finding Focus was on the whole time. It is the
@@ -159,7 +165,7 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    files under `~/Library/DoNotDisturb/` are TCC-protected, so Marmot cannot
    read them: only a human can check.
 
-5. **macOS drops notifications from unauthorised apps silently.** `osascript`
+6. **macOS drops notifications from unauthorised apps silently.** `osascript`
    exits 0 and nothing appears. A plain `display notification` is posted by
    *Script Editor*, which almost nobody has authorised — so the notification has
    to be attributed to the host terminal via `__CFBundleIdentifier`, and even
@@ -167,7 +173,7 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    `com.apple.ncprefs` to tell the difference, and `marmot doctor` reports it.
    Never assume a notification arrived because the command succeeded.
 
-6. **A slash command in a session whose plugin was just removed prints nothing
+7. **A slash command in a session whose plugin was just removed prints nothing
    at all.** `${CLAUDE_PLUGIN_ROOT}` empties, the command becomes
    `node "/bin/marmot.mjs"`, node writes *Cannot find module* to stderr, and the
    slash command surfaces an empty result — it reads as "the report is broken"
@@ -176,7 +182,7 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    anything. `claude plugin list` also keeps reporting the old state until then,
    including `✔ enabled` for a plugin you have just uninstalled.
 
-7. **`claude plugin install` has no `--force`.** To pick up changes:
+8. **`claude plugin install` has no `--force`.** To pick up changes:
    ```bash
    claude plugin marketplace update marmot
    claude plugin uninstall marmot && claude plugin install marmot@marmot
@@ -192,7 +198,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 278 tests, node:test, no dependencies
+npm test        # 284 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

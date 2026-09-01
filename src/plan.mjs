@@ -21,6 +21,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 /** `default_claude_max_20x` and friends, in words. */
 export function planName({ tier, orgType, billing, hasOauth }) {
@@ -162,3 +163,43 @@ export const limitsExpired = (plan) => Boolean(plan?.limits?.length) && usableLi
 export function tightestLimit(limits = []) {
   return limits.reduce((a, l) => (a === null || l.percent > a.percent ? l : a), null);
 }
+
+/**
+ * Ask Claude Code to refresh its own usage snapshot.
+ *
+ * `/usage` is handled entirely client-side: run headless it fetches the live
+ * figures, updates `cachedUsageUtilization`, and creates no session and no
+ * model turn — measured at zero tokens and no transcript. So this needs no
+ * credentials of ours, calls no undocumented endpoint, and costs nothing. It
+ * simply asks Claude Code to do the thing it already does, now rather than
+ * whenever it would have.
+ *
+ * Never throws: an unrefreshed snapshot is worth reporting with its age, and a
+ * missing `claude` on PATH is not an error worth a stack trace.
+ */
+export function refreshUsage(root, { timeoutMs = 45_000, run, now = Date.now(), env = process.env } = {}) {
+  const before = readPlan(root, { now, env }).fetchedAt;
+  try {
+    const exec =
+      run ??
+      ((cmd, args) =>
+        execFileSync(cmd, args, {
+          encoding: "utf8",
+          timeout: timeoutMs,
+          stdio: ["ignore", "pipe", "ignore"],
+          // Run somewhere neutral: this should not adopt the project's
+          // settings, hooks or MCP servers just to read a number.
+          cwd: env.TMPDIR || "/tmp",
+          env: { ...env, MARMOT_NO_NOTIFY: "1" },
+        }));
+    exec("claude", ["-p", "/usage"]);
+  } catch {
+    return { refreshed: false, reason: "could not run `claude -p /usage`" };
+  }
+  const after = readPlan(root, { now: Date.now(), env });
+  return { refreshed: after.fetchedAt !== before && after.fetchedAt !== null, plan: after };
+}
+
+/** True when a refresh would tell us something the cache cannot. */
+export const worthRefreshing = (plan, staleAfterMins = 60) =>
+  !plan?.fetchedAt || limitsExpired(plan) || usableLimits(plan).length === 0 || (plan.ageMins ?? Infinity) > staleAfterMins;

@@ -62,6 +62,7 @@ if (has("help") || cmd === "help") {
     --sessions        List every session in the window under the report
     --browse          Also build and open the session browser page
     --no-audit        Do not measure MCP servers, even with no recent figures
+    --no-refresh      Do not refresh plan limits, even when the window has reset
 
   config only
     --print           Also print the file to the terminal
@@ -370,9 +371,27 @@ async function mcpSizes() {
 
 const MCP_SIZES = await mcpSizes();
 
+/**
+ * The plan, with its limits actually current. A reading whose window has reset
+ * says nothing about the window you are in, so it is worth the couple of
+ * seconds to ask Claude Code to refresh — it costs no tokens.
+ */
+async function readPlanFresh() {
+  const { readPlan, refreshUsage, worthRefreshing } = await import("../src/plan.mjs");
+  let plan = readPlan(ROOT);
+  if (!cfg.limits?.enabled || !cfg.limits?.autoRefresh || has("no-refresh")) return plan;
+  if (!plan.plan || !worthRefreshing(plan, cfg.limits.staleAfterMins)) return plan;
+
+  process.stdout.write(dim("\n  Refreshing your plan limits — this asks Claude Code, and costs no tokens.\n"));
+  const r = refreshUsage(ROOT);
+  if (r.refreshed) return r.plan;
+  process.stdout.write(dim(`  Could not refresh; reporting what is cached.\n`));
+  return plan;
+}
+
 const PLAN = DEMO
   ? { plan: "Max 5×", limits: [{ kind: "session", label: "5-hour session", percent: 34, severity: "normal", resetsAt: new Date(Date.now() + 4200_000).toISOString(), active: true }, { kind: "weekly_all", label: "weekly", percent: 61, severity: "normal", resetsAt: new Date(Date.now() + 260_000_000).toISOString(), active: true }], spend: null, fetchedAt: Date.now(), ageMins: 3, stale: false }
-  : (await import("../src/plan.mjs")).readPlan(ROOT);
+  : await readPlanFresh();
 
 const nudges = evaluate(sessions, cfg, {
   root: ROOT,

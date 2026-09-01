@@ -131,13 +131,22 @@ On pay-as-you-go the same figure is the real price, and it is labelled
 | **Weekly, per model** | A second seven-day window scoped to one model, shown only when it is in use. |
 | **Usage credits** | Real money beyond the plan, if you have them enabled. A monthly cap in dollars, and the one figure here that is an actual bill. |
 
-The percentages come from the snapshot Claude Code caches, so they are as fresh
-as the last time it asked. Two things follow, and the report says both out
-loud: anything over an hour old is shown with its age attached, and a reading
-whose window has **already reset** is shown as `—` rather than as a
-comfortable-looking number, because "5% used" about a window that no longer
-exists reads as *plenty left* when the truth is *nobody has measured*. Run
-`/usage` in Claude Code to refresh it.
+The percentages come from the snapshot Claude Code caches, which can be hours
+old — and a reading whose window has **already reset** is worse than stale, it
+is dead: "5% used" about a window that no longer exists reads as *plenty left*
+when the truth is *nobody has measured*.
+
+So Marmot refreshes it when it needs to, by asking Claude Code:
+
+```
+  Refreshing your plan limits — this asks Claude Code, and costs no tokens.
+```
+
+That runs `claude -p /usage`, which is handled entirely client-side — no model
+turn, no session, no transcript, and no credentials of ours. It happens on the
+report and on the daily digest, never on the per-turn hook, which has to stay
+fast. `limits.autoRefresh: false` or `--no-refresh` turns it off, and then a
+reading past its window shows as `—` rather than as a number.
 
 Subscription plans return no dollar value for a limit, which is exactly why
 percent is the unit.
@@ -227,6 +236,7 @@ pre-commit hook.
 | `--limit N` | `browse`: most recent N, default 25 |
 | `--no-text` | `browse`: counts and tool names only, no prompts |
 | `--no-audit` | Skip measuring MCP servers this run |
+| `--no-refresh` | Skip refreshing plan limits this run |
 
 ### Chasing a nudge to its source
 
@@ -341,7 +351,7 @@ them work.
   "digest": { "cadence": "daily" },
 
   // Marks on the way to your plan's limits. Each speaks once. See below.
-  "limits": { "enabled": true, "steps": [50, 75, 90] },
+  "limits": { "enabled": true, "steps": [50, 75, 90], "autoRefresh": true },
 
   // The report measures your MCP servers when it has nothing recent.
   // autoAudit false means it only ever measures when you ask it to.

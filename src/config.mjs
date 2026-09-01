@@ -72,6 +72,10 @@ export const DEFAULTS = {
     // A cached percentage older than this is reported with its age attached
     // rather than as current.
     staleAfterMins: 60,
+    // When the snapshot is stale or its window has reset, ask Claude Code to
+    // refresh it: `claude -p /usage` is handled client-side, costs no tokens
+    // and creates no session. Set false to only ever read what is cached.
+    autoRefresh: true,
   },
 
   daily: {

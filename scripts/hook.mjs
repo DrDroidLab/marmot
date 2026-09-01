@@ -26,7 +26,7 @@ import { renderNudges } from "../src/render.mjs";
 import { readState, writeState, shouldFire, markFired } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
 import { alert } from "../src/notify.mjs";
-import { readPlan } from "../src/plan.mjs";
+import { readPlan, refreshUsage, worthRefreshing } from "../src/plan.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
 
@@ -64,7 +64,16 @@ if (event === "SessionStart") {
     root,
     today,
     windowSessions: sessions,
-    plan: readPlan(root),
+    // Once a day, on the digest, it is worth the couple of seconds. The Stop
+    // hook below runs at the end of every turn and must not pay that.
+    plan: (() => {
+      const p = readPlan(root);
+      if (cfg.limits?.autoRefresh && p.plan && worthRefreshing(p, cfg.limits.staleAfterMins)) {
+        const r = refreshUsage(root);
+        if (r.refreshed) return r.plan;
+      }
+      return p;
+    })(),
   });
   const days = byDay(sessions);
   const y = days.find((d) => d.day === yesterday);
