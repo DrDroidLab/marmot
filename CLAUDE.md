@@ -153,7 +153,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 174 tests, node:test, no dependencies
+npm test        # 190 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

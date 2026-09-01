@@ -4,7 +4,7 @@
   "description": "Your own Claude Code token consumption, read from the session records already on your machine. No account, no server, nothing uploaded.",
   "type": "module",
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test test/*.test.mjs"
   },
   "bin": {
     "marmot": "./bin/marmot.mjs"

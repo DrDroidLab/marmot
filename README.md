@@ -163,7 +163,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 174 tests, no dependencies, ~2s
+npm test        # 190 tests, no dependencies, ~2s
 ```
 
 ## License
