@@ -26,7 +26,7 @@ import { renderNudges } from "../src/render.mjs";
 import { readState, writeState, shouldFire, markFired } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
 import { alert } from "../src/notify.mjs";
-import { readPlan, refreshUsage, worthRefreshing } from "../src/plan.mjs";
+import { readPlan, refreshUsage, worthRefreshing, readAttribution } from "../src/plan.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
 
@@ -74,6 +74,7 @@ if (event === "SessionStart") {
       }
       return p;
     })(),
+    attribution: readAttribution(root),
   });
   const days = byDay(sessions);
   const y = days.find((d) => d.day === yesterday);

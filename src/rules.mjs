@@ -231,7 +231,7 @@ export const sessionRules = [
 ];
 
 /** Rules that need the whole window rather than one session. */
-export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null, plan = null } = {}) {
+export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null, plan = null, attribution = null } = {}) {
   const out = [];
   const days = byDay(sessions);
   const todayRow = days.find((d) => d.day === today);
@@ -310,6 +310,27 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
         detail: `${Math.round(p.elapsedPct)}% through the ${l.label} window with ${l.percent}% of it gone — ${p.pace.toFixed(1)}× the pace that would last. At this rate it runs out in about ${mins(p.exhaustsInMs / 60_000)}, ${mins((p.remainingMs - p.exhaustsInMs) / 60_000)} before it resets.`,
         action:
           "The levers, biggest first: detach MCP servers you are not calling, start a fresh session rather than carrying context you have finished with, and drop to Sonnet for work that does not need more.",
+        sessions: [],
+      });
+    }
+  }
+
+  // Claude Code's own accounting of what is eating your limits. Quoting the
+  // source beats inferring it, and it names the two habits Marmot can only
+  // guess at from transcripts: very long sessions, and very large context.
+  if (cfg.limits?.enabled && attribution?.windows?.length) {
+    const w = attribution.windows[attribution.windows.length - 1]; // the widest window
+    const loud = (w.behaviours ?? []).filter((b) => b.percent >= (cfg.limits.driverMinPercent ?? 60));
+    for (const b of loud) {
+      const long = /sessions?\s+active/i.test(b.text);
+      out.push({
+        id: "limit-drivers",
+        key: `limit-drivers:${w.label}:${b.text.slice(0, 24)}:${Math.floor(b.percent / 10) * 10}`,
+        label: "What is actually eating your limits",
+        detail: `Claude Code attributes ${b.percent}% of your usage over the ${w.label.replace(/^Last\s+/i, "last ")} to usage that ${b.text.replace(/^of your usage\s*/i, "")}. That is across ${num(w.requests)} requests${w.sessions ? ` in ${w.sessions} sessions` : ""}.`,
+        action: long
+          ? "Sessions that stay open carry every earlier turn into every later one. Starting a fresh session at each new piece of work is the single biggest lever here."
+          : "Large context is paid on every turn that carries it. /compact when the early part of a session stops being relevant, and detach MCP servers you are not calling.",
         sessions: [],
       });
     }

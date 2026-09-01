@@ -103,6 +103,7 @@ of what it looks for:
 | `tool-errors` | Failed calls, paid for twice: once to fail, once to retry |
 | `limit-reached` | Half, three quarters, then nine tenths of your plan's 5-hour or weekly allowance gone |
 | `limit-pace` | Spending a window faster than it passes — 78% gone with half the week left |
+| `limit-drivers` | What Claude Code itself says is eating your limits, quoted rather than inferred |
 | `daily-baseline` | A day well past your own normal, whatever normal is for you |
 | `session-cost` / `daily-cost` | A session or day past a dollar ceiling — **pay-as-you-go only**, see below |
 
@@ -295,6 +296,29 @@ It opens in a real text editor rather than a preview — `$VISUAL`/`$EDITOR`, el
 the platform default. A terminal editor like vim is used only where there is a
 terminal to attach it to, so `/marmot:config` opens a window instead of hanging.
 
+### What Claude Code says is eating your limits
+
+Refreshing the limits also captures something no local file holds: Anthropic's
+own attribution of what your usage is going on.
+
+```
+  What is driving your limits · last 7d
+  Claude Code's own attribution, over 2,594 requests in 19 sessions.
+     96%  of your usage was at >150k context
+     80%  of your usage came from sessions active for 8+ hours
+          top skills: claude-api 1%
+          top mcp servers: sprinto 1%
+```
+
+This is the most credible thing here, because it is not inferred from
+transcripts — it is the source's own accounting, and it names the two habits a
+transcript cannot see directly. `limit-drivers` quotes it when a share passes
+`limits.driverMinPercent` (60% by default).
+
+It is human-formatted text with no stability guarantee, so it is parsed the way
+the transcript readers are written: every line optional, anything unrecognised
+skipped, a format change costing the section rather than the report.
+
 ### Limit thresholds
 
 `limit-reached` speaks at marks on the way to a limit rather than at one cap,
@@ -364,7 +388,8 @@ them work.
 
   // Marks on the way to your plan's limits. Each speaks once. See below.
   "limits": { "enabled": true, "steps": [50, 75, 90], "autoRefresh": true,
-               "paceRatio": 1.5, "paceMinElapsed": 15, "paceMinUsed": 20 },
+               "paceRatio": 1.5, "paceMinElapsed": 15, "paceMinUsed": 20,
+               "driverMinPercent": 60 },
 
   // The report measures your MCP servers when it has nothing recent.
   // autoAudit false means it only ever measures when you ask it to.

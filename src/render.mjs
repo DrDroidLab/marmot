@@ -74,7 +74,7 @@ export function renderSessionList(sessions, { heading = false } = {}) {
   return out.join("\n");
 }
 
-export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null }) {
+export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null, attribution = null }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"
     : "everything below was read from ~/.claude/projects on this machine";
@@ -189,6 +189,19 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
       out.push(
         dim(`  ${"".padEnd(w)}  ${num(total)} tokens on every request`) + (idle ? warn(`, ${num(idle)} of them idle`) : ""),
       );
+    }
+  }
+
+  // Claude Code's own accounting, which beats anything inferred from
+  // transcripts — and names the two things transcripts cannot see directly.
+  const attr = attribution?.windows?.[attribution.windows.length - 1];
+  if (attr?.behaviours?.length) {
+    out.push("");
+    out.push(bold(`  What is driving your limits · ${attr.label.replace(/^Last\s+/i, "last ")}`));
+    out.push(dim(`  Claude Code's own attribution, over ${num(attr.requests)} requests${attr.sessions ? ` in ${attr.sessions} sessions` : ""}.`));
+    for (const b of attr.behaviours) out.push(`  ${String(`${b.percent}%`).padStart(6)}  ${b.text}`);
+    for (const [kind, items] of Object.entries(attr.top ?? {})) {
+      out.push(dim(`  ${"".padStart(6)}  top ${kind.replace(/-/g, " ")}: ${items.map((i) => `${i.name} ${i.percent}%`).join(", ")}`));
     }
   }
 

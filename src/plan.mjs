@@ -20,7 +20,7 @@
  * name the plan.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 /** `default_claude_max_20x` and friends, in words. */
@@ -229,14 +229,108 @@ export function refreshUsage(root, { timeoutMs = 45_000, run, now = Date.now(), 
           cwd: env.TMPDIR || "/tmp",
           env: { ...env, MARMOT_NO_NOTIFY: "1" },
         }));
-    exec("claude", ["-p", "/usage"]);
+    const out = exec("claude", ["-p", "/usage"]);
+    // The attribution block exists only in this output, so it is saved here or
+    // it is lost until the next refresh.
+    const attribution = parseUsageOutput(out);
+    if (attribution) writeAttribution(root, attribution);
   } catch {
     return { refreshed: false, reason: "could not run `claude -p /usage`" };
   }
   const after = readPlan(root, { now: Date.now(), env });
-  return { refreshed: after.fetchedAt !== before && after.fetchedAt !== null, plan: after };
+  return { refreshed: after.fetchedAt !== before && after.fetchedAt !== null, plan: after, attribution: readAttribution(root) };
+}
+
+export const attributionPath = (root) => `${root}/marmot-usage.json`;
+
+function writeAttribution(root, attribution) {
+  try {
+    writeFileSync(attributionPath(root), JSON.stringify(attribution, null, 2) + "\n");
+  } catch {
+    /* an unwritable cache costs the section, not the report */
+  }
+}
+
+/** What the last refresh said was driving your limits, if anything did. */
+export function readAttribution(root) {
+  const p = attributionPath(root);
+  if (!existsSync(p)) return null;
+  try {
+    const d = JSON.parse(readFileSync(p, "utf8"));
+    return d?.windows?.length ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 /** True when a refresh would tell us something the cache cannot. */
 export const worthRefreshing = (plan, staleAfterMins = 60) =>
   !plan?.fetchedAt || limitsExpired(plan) || usableLimits(plan).length === 0 || (plan.ageMins ?? Infinity) > staleAfterMins;
+
+/**
+ * What Claude Code itself says is driving your limit usage.
+ *
+ * `/usage` prints an attribution block that no local file carries: the share of
+ * usage that came from very long sessions, the share that ran at high context,
+ * and the skills, plugins and MCP servers contributing most. It is Anthropic's
+ * own accounting rather than our inference, which makes it the most credible
+ * thing Marmot can show — a nudge that says "80% of your usage came from
+ * sessions active for 8+ hours" is quoting the source, not arguing with it.
+ *
+ * It is human-formatted text with no stability guarantee, so this is written
+ * the way the transcript readers are: every line is optional, anything
+ * unrecognised is skipped, and a format change costs a section rather than the
+ * report. `marmot doctor` surfaces when nothing could be parsed.
+ */
+export function parseUsageOutput(text) {
+  const lines = String(text ?? "").split("\n");
+  const windows = [];
+  let current = null;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+
+    // "Last 24h · 976 requests · 13 sessions"
+    const head = /^(Last\s+[^\u00b7]+?)\s*\u00b7\s*([\d,]+)\s+requests?(?:\s*\u00b7\s*([\d,]+)\s+sessions?)?/i.exec(line.trim());
+    if (head) {
+      current = {
+        label: head[1].trim(),
+        requests: Number(head[2].replace(/,/g, "")),
+        sessions: head[3] ? Number(head[3].replace(/,/g, "")) : null,
+        behaviours: [],
+        top: {},
+      };
+      windows.push(current);
+      continue;
+    }
+    if (!current) continue;
+
+    const body = line.trim();
+    if (!body) continue;
+
+    // "Top skills: /claude-api 2%, /dataviz 2%"
+    const top = /^Top\s+([A-Za-z ]+?)\s*:\s*(.+)$/i.exec(body);
+    if (top) {
+      const key = top[1].trim().toLowerCase().replace(/\s+/g, "-");
+      const items = top[2]
+        .split(",")
+        .map((chunk) => /^\s*(.+?)\s+(\d+(?:\.\d+)?)%\s*$/.exec(chunk))
+        .filter(Boolean)
+        .map((m) => ({ name: m[1].replace(/^\//, ""), percent: Number(m[2]) }));
+      if (items.length) current.top[key] = items;
+      continue;
+    }
+
+    // "92% of your usage was at >150k context"
+    const behaviour = /^(\d+(?:\.\d+)?)%\s+(.*\S)\s*$/.exec(body);
+    if (behaviour) {
+      current.behaviours.push({ percent: Number(behaviour[1]), text: behaviour[2] });
+    }
+  }
+
+  return windows.length ? { windows, parsedAt: new Date().toISOString() } : null;
+}
+
+/** The window an attribution question is about, by preference longest. */
+export const attributionFor = (attr, label) =>
+  (attr?.windows ?? []).find((w) => (label ? w.label.toLowerCase().includes(label) : true)) ?? null;

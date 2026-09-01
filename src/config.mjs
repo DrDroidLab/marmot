@@ -76,6 +76,12 @@ export const DEFAULTS = {
     // a ratio gap (how far ahead of pace), a minimum sample (enough of the
     // window gone for the ratio to mean anything) and a floor (enough of the
     // allowance used to be worth a word).
+    // Claude Code's own attribution of what is driving your limit usage. It
+    // says things like "80% of your usage came from sessions active for 8+
+    // hours" — quoting that beats inferring it, so the bar is high enough that
+    // it is worth repeating.
+    driverMinPercent: 60,
+
     paceRatio: 1.5,
     paceMinElapsed: 15,
     paceMinUsed: 20,

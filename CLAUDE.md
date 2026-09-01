@@ -86,7 +86,7 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/skills.mjs` | Skill sizes, read from SKILL.md on disk. |
 | `src/mcp.mjs` | Server discovery, and the audit client. The only code that starts a process. |
 | `src/open.mjs` | Which editor opens the config, per OS. `open -t`, not `open`. |
-| `src/plan.mjs` | Plan and real limit utilisation, from `~/.claude.json`. |
+| `src/plan.mjs` | Plan, real limit utilisation, and the `/usage` attribution block. |
 
 `docs/marmot.ico` is generated from `docs/marmot.svg` — render it to a 256px
 PNG and wrap it in an ICO container (a PNG-embedded ICO, fine on Vista+).
@@ -198,7 +198,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 291 tests, node:test, no dependencies
+npm test        # 297 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

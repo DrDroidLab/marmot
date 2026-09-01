@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readPlan, planName, paysPerToken, tightestLimit, usableLimits, limitsExpired, worthRefreshing, refreshUsage, limitPace } from "../src/plan.mjs";
+import { readPlan, planName, paysPerToken, tightestLimit, usableLimits, limitsExpired, worthRefreshing, refreshUsage, limitPace, parseUsageOutput, readAttribution, attributionPath } from "../src/plan.mjs";
 import { windowRules, limitSteps, sessionRules, evaluate } from "../src/rules.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { tmpRoot } from "./helpers.mjs";
@@ -425,4 +425,101 @@ test("limit-pace re-speaks only when the pace itself worsens", () => {
 test("an expired window has no pace either", () => {
   const plan = { plan: "Max 20×", ageMins: 1, limits: [{ ...weekly(90, 4), expired: true }] };
   assert.equal(windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan }).length, 0);
+});
+
+/* ── Claude Code's own attribution ─────────────────────────────────────── */
+
+// Captured verbatim from `claude -p "/usage"`.
+const USAGE_OUTPUT = `You are currently using your subscription to power your Claude Code usage
+
+Current session: 3% used · resets Sep 2 at 4:29am (Asia/Calcutta)
+Current week (all models): 0% used · resets Sep 8 at 10:29pm (Asia/Calcutta)
+Current week (Fable): 0% used
+
+What's contributing to your limits usage?
+Approximate, based on local sessions on this machine — does not include other devices or claude.ai.
+
+Last 24h · 976 requests · 13 sessions
+  92% of your usage was at >150k context
+  Top skills: /claude-api 2%, /dataviz 2%
+  Top plugins: marmot 1%
+
+Last 7d · 2,590 requests · 19 sessions
+  96% of your usage was at >150k context
+  80% of your usage came from sessions active for 8+ hours
+  Top skills: /claude-api 1%
+  Top MCP servers: sprinto 1%
+`;
+
+test("the attribution block is parsed into windows, behaviours and contributors", () => {
+  const a = parseUsageOutput(USAGE_OUTPUT);
+  assert.equal(a.windows.length, 2);
+
+  const [day, week] = a.windows;
+  assert.equal(day.label, "Last 24h");
+  assert.equal(day.requests, 976);
+  assert.equal(day.sessions, 13);
+  assert.deepEqual(day.top.skills, [{ name: "claude-api", percent: 2 }, { name: "dataviz", percent: 2 }]);
+  assert.deepEqual(day.top.plugins, [{ name: "marmot", percent: 1 }]);
+
+  assert.equal(week.requests, 2590, "thousands separators are handled");
+  assert.deepEqual(week.behaviours.map((b) => b.percent), [96, 80]);
+  assert.match(week.behaviours[1].text, /sessions active for 8\+ hours/);
+  assert.deepEqual(week.top["mcp-servers"], [{ name: "sprinto", percent: 1 }]);
+});
+
+test("a format change costs the section, not the report", () => {
+  // Human-formatted text with no stability guarantee, so every line is optional
+  // and anything unrecognised is skipped.
+  assert.equal(parseUsageOutput(""), null);
+  assert.equal(parseUsageOutput("something else entirely"), null);
+  assert.equal(parseUsageOutput(null), null);
+
+  const partial = parseUsageOutput("Last 7d · 100 requests\n  nonsense line\n  55% of your usage was odd");
+  assert.equal(partial.windows[0].requests, 100);
+  assert.equal(partial.windows[0].sessions, null, "sessions are optional");
+  assert.deepEqual(partial.windows[0].behaviours, [{ percent: 55, text: "of your usage was odd" }]);
+});
+
+test("limit-drivers quotes the source rather than inferring", () => {
+  const attribution = parseUsageOutput(USAGE_OUTPUT);
+  const out = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", limits: [] }, attribution });
+  const hits = out.filter((w) => w.id === "limit-drivers");
+
+  assert.equal(hits.length, 2, "both behaviours are past the bar");
+  assert.match(hits[0].detail, /Claude Code attributes 96%/);
+  assert.match(hits[0].detail, /2,590 requests in 19 sessions/);
+  assert.match(hits[1].detail, /sessions active for 8\+ hours/);
+  assert.match(hits[1].action, /fresh session at each new piece of work/);
+  assert.match(hits[0].action, /compact/);
+});
+
+test("limit-drivers stays quiet below the bar", () => {
+  const quiet = parseUsageOutput("Last 7d · 100 requests · 4 sessions\n  12% of your usage was at >150k context");
+  const out = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", limits: [] }, attribution: quiet });
+  assert.equal(out.filter((w) => w.id === "limit-drivers").length, 0);
+});
+
+test("limit-drivers re-speaks only when the share moves materially", () => {
+  const key = (pct) => {
+    const a = parseUsageOutput(`Last 7d · 100 requests\n  ${pct}% of your usage was at >150k context`);
+    return windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", limits: [] }, attribution: a })[0]?.key;
+  };
+  assert.equal(key(91), key(96), "still nine tenths");
+  assert.notEqual(key(69), key(81), "a different band is worth saying again");
+});
+
+test("a saved attribution is read back, and a broken one is null", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  assert.equal(readAttribution(root), null);
+
+  writeFileSync(attributionPath(root), JSON.stringify(parseUsageOutput(USAGE_OUTPUT)));
+  assert.equal(readAttribution(root).windows.length, 2);
+
+  writeFileSync(attributionPath(root), JSON.stringify({ windows: [] }));
+  assert.equal(readAttribution(root), null, "no windows is not an attribution");
+
+  writeFileSync(attributionPath(root), "{ broken");
+  assert.equal(readAttribution(root), null);
 });
