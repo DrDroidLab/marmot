@@ -2,8 +2,15 @@ import { byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins, dim, bold, warn, info } from "./format.mjs";
 import { skillCosts } from "./skills.mjs";
 
+const SHADOW_API =
+  "These are published API rates, which is what pay-as-you-go usage actually costs.";
+const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const resetIn = (iso) => {
+  const m = (Date.parse(iso) - Date.now()) / 60_000;
+  return Number.isFinite(m) ? (m <= 0 ? "shortly" : `in ${mins(m)}`) : "soon";
+};
 const SHADOW =
-  "Cost is a shadow price — what these tokens would have cost at published API rates. On a subscription plan it is not an invoice line. Right for comparing your own sessions, wrong for finance.";
+  "The dollar figures are a shadow price — what these tokens would have cost at published API rates. On your plan they are not an invoice line; the limits above are what you actually spend. Right for comparing your own sessions to each other, wrong for finance.";
 
 export function wrap(text, width = 76, indent = "  ") {
   const words = text.split(/\s+/);
@@ -67,7 +74,7 @@ export function renderSessionList(sessions, { heading = false } = {}) {
   return out.join("\n");
 }
 
-export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [] }) {
+export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"
     : "everything below was read from ~/.claude/projects on this machine";
@@ -77,11 +84,16 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
 
   out.push("");
   out.push(bold(`  Marmot · your last ${days} days`));
-  out.push(dim(`  ${num(t.sessions)} sessions · ${source}`));
+  out.push(dim(`  ${num(t.sessions)} sessions${plan?.plan ? ` · ${plan.plan}` : ""} · ${source}`));
   out.push("");
 
+  const onSubscription = plan?.plan && plan.plan !== "API";
   const rows = [
-    ["Spend", usd(t.cost), "modelled at published rates"],
+    [
+      onSubscription ? "Modelled spend" : "Spend",
+      usd(t.cost),
+      onSubscription ? `at API rates — not what you pay on ${plan.plan}` : "at published rates",
+    ],
     ["Sessions", num(t.sessions), `${days_.length} active day${days_.length === 1 ? "" : "s"}`],
     [
       "Prompts you typed",
@@ -95,6 +107,22 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
   ];
   if (t.baseline !== null) {
     rows.push(["Baseline context", tokens(t.baseline), "median, before you type — prompt, skills, tool definitions"]);
+  }
+
+  // On a subscription this is the figure that actually bites: the money is
+  // already spent, and what runs out is allowance.
+  for (const l of plan?.limits ?? []) {
+    if (!l.active && l.percent === 0) continue;
+    const note = [
+      l.resetsAt ? `resets ${resetIn(l.resetsAt)}` : null,
+      plan.ageMins !== null && plan.ageMins > 60 ? `as of ${mins(plan.ageMins)} ago` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    rows.push([`${cap1(l.label)} limit`, `${l.percent}%`, note]);
+  }
+  if (plan?.spend && plan.spend.enabled && plan.spend.limit) {
+    rows.push(["Usage credits", `${usd(plan.spend.used ?? 0)} of ${usd(plan.spend.limit)}`, "real money, beyond the plan"]);
   }
   const pad = Math.max(...rows.map((r) => r[0].length));
   for (const [k, v, note] of rows) out.push(`  ${k.padEnd(pad)}  ${bold(String(v).padEnd(10))} ${dim(note)}`);
@@ -161,7 +189,7 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
   out.push("");
   out.push(renderNudges(nudges, { heading: true }));
   out.push("");
-  out.push(dim(wrap(SHADOW)));
+  out.push(dim(wrap(onSubscription ? SHADOW : SHADOW_API)));
   out.push("");
   return out.join("\n");
 }

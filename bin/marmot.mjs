@@ -284,6 +284,7 @@ async function runBrowse() {
       root: ROOT,
       cwd: process.cwd(),
       mcpSizes: sizes,
+      plan: has("demo") ? null : (await import("../src/plan.mjs")).readPlan(ROOT),
       configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : undefined,
     }),
     skills: (await import("../src/skills.mjs")).skillCosts(
@@ -369,8 +370,13 @@ async function mcpSizes() {
 
 const MCP_SIZES = await mcpSizes();
 
+const PLAN = DEMO
+  ? { plan: "Max 5×", limits: [{ kind: "session", label: "5-hour session", percent: 34, severity: "normal", resetsAt: new Date(Date.now() + 4200_000).toISOString(), active: true }, { kind: "weekly_all", label: "weekly", percent: 61, severity: "normal", resetsAt: new Date(Date.now() + 260_000_000).toISOString(), active: true }], spend: null, fetchedAt: Date.now(), ageMins: 3, stale: false }
+  : (await import("../src/plan.mjs")).readPlan(ROOT);
+
 const nudges = evaluate(sessions, cfg, {
   root: ROOT,
+  plan: PLAN,
   cwd: DEMO ? null : process.cwd(),
   mcpSizes: MCP_SIZES,
   // Demo runs must not read this machine's MCP config, or the demo reports on you.
@@ -396,6 +402,7 @@ if (cmd === "doctor") {
 
   process.stdout.write(`
   Root            ${ROOT}
+  Plan            ${(await import("../src/plan.mjs")).readPlan(ROOT).plan ?? "not detected — dollar figures are modelled at API rates"}
   Sessions        ${num(sessions.length)} in ${DAYS} days
   Thresholds      ${cfg._exists ? cfg._path : "defaults (no config file — run `marmot init` to write one)"}
   Priced turns    ${num(sessions.reduce((a, s) => a + s.pricedTurns, 0))} of ${num(t.turns)}
@@ -454,7 +461,7 @@ const SKILL_SIZES = DEMO
   ? (await import("../src/demo.mjs")).demoSkillSizes
   : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
 const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : (await import("../src/sessions.mjs")).configuredServers(ROOT, process.cwd());
-process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED }));
+process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN }));
 
 // `--sessions` and `--browse` are what make one command enough: the numbers,
 // every session behind them, and the full page when you want to dig in.

@@ -54,6 +54,7 @@ of what it looks for:
 | `premium-window` | …and that becoming a habit rather than a one-off |
 | `cache-hit` | Context being rebuilt each turn instead of continued — cache reads cost a tenth of fresh input |
 | `tool-errors` | Failed calls, paid for twice: once to fail, once to retry |
+| `limit-reached` | Half, three quarters, then nine tenths of your plan's 5-hour or weekly allowance gone |
 | `session-cost` / `daily-cost` / `daily-baseline` | A session or a day past the ceiling you set, or well past your own normal |
 
 Every rule is deterministic and local. **No model decides whether to nudge
@@ -100,6 +101,30 @@ A nudge you cannot trace produces suspicion rather than a change of habit, so
   sentry              0×  14 tools · ~2.3K tokens  ▲ never called
                     18,825 tokens on every request, 16,262 of them idle
 ```
+
+### Dollars, or allowance
+
+On a subscription the dollar figure is not what you pay — you already paid it,
+and what you actually spend is *allowance*. So Marmot reads your plan and your
+real limit utilisation from what Claude Code caches, and reports both:
+
+```
+  Marmot · your last 7 days
+  23 sessions · Max 20× · everything below was read from ~/.claude/projects
+
+  Modelled spend        $1,825    at API rates — not what you pay on Max 20×
+  5-hour session limit  5%        resets in 1.2h
+  Weekly limit          19%       resets in 3.0d
+  Usage credits         $0.00 of $50.00   real money, beyond the plan
+```
+
+On pay-as-you-go the same figure is the real price, and it is labelled
+**Spend** rather than *Modelled spend* — there the dollars are the point.
+
+The percentages come from the snapshot Claude Code caches, so they are as fresh
+as the last time it asked; anything over an hour old is shown with its age
+attached rather than as current. Subscription plans return no dollar value for
+a limit, which is exactly why percent is the unit.
 
 **Baseline context** is what every request carries before you type — system
 prompt, skill descriptions, every attached tool definition — and it is what
@@ -242,6 +267,26 @@ reads it.
 It opens in a real text editor rather than a preview — `$VISUAL`/`$EDITOR`, else
 the platform default. A terminal editor like vim is used only where there is a
 terminal to attach it to, so `/marmot:config` opens a window instead of hanging.
+
+### Limit thresholds
+
+`limit-reached` speaks at marks on the way to a limit rather than at one cap,
+so you hear *half gone* long before *nearly out*. Each mark speaks once.
+
+```jsonc
+"limits": {
+  "enabled": true,
+  "steps": [50, 75, 90],        // the default marks
+  "byPlan": {                   // the same percentage is a different amount of room
+    "Pro":        [50, 75, 90],
+    "Max 5×":     [50, 75, 90],
+    "Max 20×":    [50, 75, 90],
+    "Team":       [50, 75, 90],
+    "Enterprise": [50, 75, 90],
+    "API":        []            // nothing to run out of
+  }
+}
+```
 
 ### The nudge thresholds
 

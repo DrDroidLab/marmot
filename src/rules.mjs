@@ -80,6 +80,26 @@ export function areasOf(s, cfg) {
   return [...groups.values()].sort((a, b) => a.firstTurn - b.firstTurn);
 }
 
+/**
+ * The marks to speak at, for this plan. Per-plan first, then the shared
+ * default, and always sorted so "the highest one passed" means what it says.
+ */
+export function limitSteps(cfg, plan) {
+  const byPlan = cfg.limits?.byPlan ?? {};
+  const chosen = plan && Object.prototype.hasOwnProperty.call(byPlan, plan) ? byPlan[plan] : cfg.limits?.steps;
+  return (Array.isArray(chosen) ? chosen : [])
+    .filter((n) => typeof n === "number" && n > 0)
+    .sort((a, b) => a - b);
+}
+
+/** "in 2.1h", or "shortly", without pretending to more precision than we have. */
+function resetWording(iso) {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "soon";
+  const m = (at - Date.now()) / 60_000;
+  return m <= 0 ? "shortly" : `in ${mins(m)}`;
+}
+
 /** The longest pause between two prompts you typed, in minutes. */
 export function longestGapMins(times = []) {
   let max = 0;
@@ -197,7 +217,7 @@ export const sessionRules = [
 ];
 
 /** Rules that need the whole window rather than one session. */
-export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null } = {}) {
+export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null, plan = null } = {}) {
   const out = [];
   const days = byDay(sessions);
   const todayRow = days.find((d) => d.day === today);
@@ -226,6 +246,33 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
         detail: `${usd(todayRow.cost)} today against a ${prior.length}-day average of ${usd(mean)}. That is past ${cfg.daily.baselineSigma}σ.`,
         action: "Not a verdict — a heavy day is often a hard day. Worth knowing it is unlike your normal.",
         sessions: sessions.filter((s) => s.day === today).map((s) => s.id),
+      });
+    }
+  }
+
+  // Your plan's own limits. On a subscription this is the number that actually
+  // bites — you have already paid the money, and what runs out is allowance.
+  if (cfg.limits?.enabled && plan?.limits?.length) {
+    const steps = limitSteps(cfg, plan.plan);
+    for (const l of plan.limits) {
+      // The highest mark this window has passed. Each speaks once, so 91% says
+      // "90%" rather than repeating what 76% already said.
+      const crossed = steps.filter((n) => l.percent >= n).sort((a, b) => b - a)[0];
+      if (crossed === undefined) continue;
+      const age = plan.ageMins !== null && plan.ageMins > (cfg.limits.staleAfterMins ?? 60) ? ` as of ${mins(plan.ageMins)} ago` : "";
+      const resets = l.resetsAt ? ` It resets ${resetWording(l.resetsAt)}.` : "";
+      out.push({
+        id: "limit-reached",
+        // Keyed by the mark, so crossing the next one is news and re-reading
+        // the same one is not.
+        key: `limit-reached:${l.kind}:${crossed}`,
+        label: `${l.label === "weekly" ? "Weekly" : "Session"} limit ${l.percent}% used`,
+        detail: `${l.percent}% of your ${l.label} limit is gone${age}${plan.plan ? ` on ${plan.plan}` : ""}.${resets}`,
+        action:
+          l.kind === "session"
+            ? "The 5-hour window refills on its own. Heavy context is what fills it fastest, so a fresh session or a /compact buys back more than working slower does."
+            : "Worth knowing before the week is out. The cheapest savings are usually idle MCP servers and sessions carrying context they finished with.",
+        sessions: [],
       });
     }
   }

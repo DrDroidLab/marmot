@@ -26,6 +26,7 @@ import { renderNudges } from "../src/render.mjs";
 import { readState, writeState, shouldFire, markFired } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
 import { alert } from "../src/notify.mjs";
+import { readPlan } from "../src/plan.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
 
@@ -63,6 +64,7 @@ if (event === "SessionStart") {
     root,
     today,
     windowSessions: sessions,
+    plan: readPlan(root),
   });
   const days = byDay(sessions);
   const y = days.find((d) => d.day === yesterday);
@@ -104,7 +106,7 @@ for (const rule of sessionRules) {
 
 // Today's total needs the other sessions too. They change slowly; re-read at
 // most every few minutes so this stays cheap on a hook that fires every turn.
-if (live.has("daily-cost") || live.has("daily-baseline")) {
+if (live.has("daily-cost") || live.has("daily-baseline") || live.has("limit-reached")) {
   const cache = state.dailyCache;
   const fresh = cache && cache.day === today && Date.now() - cache.at < THROTTLE_MS;
   let others = fresh ? cache.sessions : null;
@@ -115,11 +117,14 @@ if (live.has("daily-cost") || live.has("daily-baseline")) {
     state.dailyCache = { day: today, at: Date.now(), sessions: others };
   }
   const all = [...others, { id: current.id, day: today, cost: current.cost, typedPrompts: current.typedPrompts, assistantTurns: current.assistantTurns }];
-  for (const w of windowRules(all, cfg, { root, today, includeMcp: false })) {
+  // The plan's own limits belong in the live path above all: "you are at 90% of
+  // this week" is only actionable before the week is out.
+  for (const w of windowRules(all, cfg, { root, today, includeMcp: false, plan: readPlan(root) })) {
     if (!live.has(w.id)) continue;
     const todayCost = all.filter((s) => s.day === today).reduce((a, s) => a + s.cost, 0);
-    if (!shouldFire(state, today, w.id, todayCost)) continue;
-    markFired(state, today, w.id, todayCost);
+    const key = w.key ?? w.id;
+    if (!shouldFire(state, today, key, todayCost)) continue;
+    markFired(state, today, key, todayCost);
     lines.push({ label: w.label, detail: w.detail, action: w.action });
   }
 }

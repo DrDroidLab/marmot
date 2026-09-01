@@ -18,7 +18,7 @@ export const DEFAULTS = {
   // Rules that may interrupt you mid-session, at the end of an assistant turn.
   // Everything else is saved for the digest — a nudge you cannot act on right
   // now is an interruption, not a nudge.
-  live: ["session-cost", "daily-cost", "daily-baseline", "session-turns"],
+  live: ["session-cost", "daily-cost", "daily-baseline", "session-turns", "limit-reached"],
   digest: { cadence: "daily" },
 
   session: {
@@ -45,6 +45,30 @@ export const DEFAULTS = {
     topicDepth: 1,
     // A day. Shorter gaps are lunch, not a change of subject.
     topicGapMins: 1440,
+  },
+
+  // Your plan's own limits, read from the snapshot Claude Code caches. On a
+  // subscription these matter far more than a modelled dollar figure: the
+  // dollars are already paid, and what you are actually spending is allowance.
+  limits: {
+    enabled: true,
+    // Marks on the way to a limit, as a percentage of it. Crossing each one
+    // speaks once, so you hear "half gone" long before "nearly out" — a single
+    // cap can only ever tell you the second.
+    steps: [50, 75, 90],
+    // Per plan, because the same percentage means a different amount of room.
+    // An empty array silences a plan; API usage has no limit to run out of.
+    byPlan: {
+      "Pro": [50, 75, 90],
+      "Max 5×": [50, 75, 90],
+      "Max 20×": [50, 75, 90],
+      "Team": [50, 75, 90],
+      "Enterprise": [50, 75, 90],
+      "API": [],
+    },
+    // A cached percentage older than this is reported with its age attached
+    // rather than as current.
+    staleAfterMins: 60,
   },
 
   daily: {
