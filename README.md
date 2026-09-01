@@ -1,5 +1,14 @@
 # Marmot
 
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/DrDroidLab/marmot)
+[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/AQ3tusPtZn)
+
+> **Alpha.** This is early software, and it reads a file format that is internal
+> and undocumented — a Claude Code update can break a metric. `marmot doctor`
+> shows what's still readable on your machine. Bugs and ideas are welcome, in
+> [issues](https://github.com/DrDroidLab/marmot/issues) or on
+> [Discord](https://discord.gg/AQ3tusPtZn).
+
 **Your own Claude Code token consumption, read from the session records already on your machine.**
 
 Claude Code writes every session to `~/.claude/projects/<slug>/<session-id>.jsonl` as it runs. Marmot reads those files and tells you what your sessions cost, where the turns went, and when something is worth a second look.
