@@ -200,6 +200,85 @@ test("marmot sessions and report --sessions render the same lines", (t) => {
   assert.ok(folded.includes(standalone), "one renderer, so the two cannot drift");
 });
 
+test("config set changes a threshold without opening an editor", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  run(["config", "--no-open", "--root", root]);
+
+  const { out } = run(["config", "set", "session.costCap=50", "limits.steps=[25,50,75]", "notify.bell=false", "--root", root]);
+  assert.match(out, /session\.costCap: 25 → 50/, "it says what it changed");
+
+  const cfg = JSON.parse(readFileSync(join(root, "marmot.json"), "utf8"));
+  // JSON first, so a number is a number and a list is a list — not the string
+  // you typed, which would silently fail every comparison in the rules.
+  assert.equal(cfg.session.costCap, 50);
+  assert.deepEqual(cfg.limits.steps, [25, 50, 75]);
+  assert.equal(cfg.notify.bell, false);
+  assert.equal(cfg.session.turnCap, 20, "siblings are left alone");
+});
+
+test("config set creates the file from the defaults when there is none", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  run(["config", "set", "session.turnCap=40", "--root", root]);
+  const cfg = JSON.parse(readFileSync(join(root, "marmot.json"), "utf8"));
+  assert.equal(cfg.session.turnCap, 40);
+  assert.equal(cfg.daily.costCap, 50, "and the rest of the defaults come with it");
+});
+
+test("config set builds a path that does not exist yet", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  run(["config", "set", "limits.byPlan.Pro=[10,20]", "--root", root]);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, "marmot.json"), "utf8")).limits.byPlan.Pro, [10, 20]);
+});
+
+test("config set with nothing to set explains itself", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const { code, out } = run(["config", "set", "--root", root], { expectFail: true });
+  assert.equal(code, 1);
+  assert.match(out, /Usage: marmot config set/);
+});
+
+test("what config set writes is what loadConfig reads", async (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  run(["config", "set", "session.costCap=99", "limits.enabled=false", "--root", root]);
+  const { loadConfig } = await import("../src/config.mjs");
+  const cfg = loadConfig(root);
+  assert.equal(cfg.session.costCap, 99);
+  assert.equal(cfg.limits.enabled, false);
+});
+
+test("doctor says whether the nudge hooks are actually wired up", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  // "Installed" and "working" are different states, and the gap is silent.
+  assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /Nudge hooks\s+not installed/);
+
+  run(["init", "--hooks", "--root", root]);
+  assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /Nudge hooks\s+SessionStart, Stop/);
+});
+
+test("doctor names a half-installed or broken hook rather than passing it", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  run(["init", "--hooks", "--root", root]);
+  const sp = join(root, "settings.json");
+
+  const settings = JSON.parse(readFileSync(sp, "utf8"));
+  delete settings.hooks.Stop;
+  writeFileSync(sp, JSON.stringify(settings));
+  assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /Stop missing/);
+
+  // A hook pointing at a deleted install looks fine in settings.json and does
+  // nothing at all.
+  settings.hooks.SessionStart[0].hooks[0].command = 'node "/gone/marmot/scripts/hook.mjs"';
+  writeFileSync(sp, JSON.stringify(settings));
+  assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /points at a missing file/);
+});
+
 /* ── the browser page ──────────────────────────────────────────────────── */
 
 const buildPage = (root, extra = []) => {

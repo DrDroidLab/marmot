@@ -33,11 +33,36 @@ npm install -g github:DrDroidLab/marmot   # installs the `marmot` command
 marmot init --hooks                       # wires up the nudges
 ```
 
-Then **restart Claude Code**, and check it took:
+Then **restart Claude Code**.
+
+### Check it worked
 
 ```bash
 marmot doctor
 ```
+
+```
+  Root            /Users/you/.claude
+  Plan            Max 20×
+  Sessions        57 in 30 days
+  Thresholds      /Users/you/.claude/marmot.json
+  Priced turns    14,401 of 14,401
+  Nudge hooks     SessionStart, Stop
+  Notifications   on · iTerm2 posts them itself, with nothing to allow
+```
+
+Three lines to read:
+
+- **`Nudge hooks`** must say `SessionStart, Stop`. Anything else names the
+  problem — `not installed`, `Stop missing`, or `points at a missing file` if a
+  hook still refers to an install that has been removed. The fix in every case
+  is `marmot init --hooks`.
+- **`Plan`** confirms it can see your subscription, which is what the limit
+  nudges are measured against.
+- **`Notifications`** names the channel a nudge would actually arrive on.
+
+If `marmot` is not found at all, npm's global bin directory is not on your PATH —
+`npm bin -g` prints it.
 
 Nothing is published to npm yet — npm installs straight from the repository, and
 there are no dependencies to fetch, so it takes a few seconds. `marmot` is then
@@ -209,7 +234,7 @@ other, wrong for finance.
 | Command | What it does |
 |---|---|
 | `marmot` | Nudges, plus the window they came from |
-| `marmot config` | Open the thresholds file |
+| `marmot config` | Open the thresholds file; `config set k=v` changes one |
 | `marmot browse` | Build the session browser page and open it |
 | `marmot nudges` | Just the nudges, nothing else |
 | `marmot sessions` | One line per session |
@@ -284,8 +309,25 @@ most of your sessions it is describing how you work rather than flagging
 anything, and it should be raised, not ignored.
 
 ```bash
-marmot config          # opens ~/.claude/marmot.json, creating it if you have none
-marmot config --print  # ...and print it to the terminal
+marmot config set session.costCap=50           # change one threshold
+marmot config set 'limits.steps=[25,50,75]'    # values are JSON: lists, numbers, booleans
+marmot config set notify.bell=false mcp.autoAudit=false
+```
+
+It prints what changed, creates the file from the defaults if you have none, and
+leaves every other key alone:
+
+```
+  /Users/you/.claude/marmot.json
+    session.costCap: 25 → 50
+```
+
+That is the form to reach for from a script or a coding agent. To read or edit
+the whole thing by hand:
+
+```bash
+marmot config          # opens it in your editor
+marmot config --print  # ...or just print it
 ```
 
 Nothing needs restarting — the next run reads it.

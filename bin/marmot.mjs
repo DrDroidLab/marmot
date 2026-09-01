@@ -48,6 +48,7 @@ if (has("help") || cmd === "help") {
     init              Write ${configPath(ROOT)} with the default thresholds.
                       --hooks installs the nudges, --statusline the statusline
     config            Open that thresholds file (creating it if it is missing)
+    config set k=v    Change a threshold without opening an editor
     mcp-audit         Ask each configured MCP server for its tools, and measure
                       what their definitions cost on every request
     doctor            What is readable on this machine, and what is not
@@ -162,6 +163,50 @@ if (cmd === "init") {
 }
 
 if (cmd === "config") {
+  // `marmot config set session.costCap=50` — for anyone who cannot open an
+  // editor, which includes every coding agent and every headless run.
+  const setArgs = argv.slice(argv.indexOf("set") + 1).filter((a) => !a.startsWith("--") && a.includes("="));
+  if (argv.includes("set")) {
+    if (!setArgs.length) {
+      process.stdout.write("Usage: marmot config set <key>=<value> [...]\n  e.g. marmot config set session.costCap=50 limits.steps=[25,50,75]\n");
+      process.exit(1);
+    }
+    const body = existsSync(cfg._path) ? JSON.parse(readFileSync(cfg._path, "utf8")) : (() => { const { _path, _exists, ...d } = { ...DEFAULTS }; return d; })();
+
+    const changes = [];
+    for (const pair of setArgs) {
+      const at = pair.indexOf("=");
+      const path = pair.slice(0, at).split(".").filter(Boolean);
+      const raw = pair.slice(at + 1);
+      if (!path.length) continue;
+      // JSON first, so numbers, booleans, arrays and null all mean themselves;
+      // anything else is the string you typed.
+      let value;
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        value = raw;
+      }
+      let node = body;
+      for (const key of path.slice(0, -1)) {
+        if (typeof node[key] !== "object" || node[key] === null || Array.isArray(node[key])) node[key] = {};
+        node = node[key];
+      }
+      const last = path[path.length - 1];
+      changes.push(`${path.join(".")}: ${JSON.stringify(node[last])} → ${JSON.stringify(value)}`);
+      node[last] = value;
+    }
+
+    try {
+      writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
+    } catch (e) {
+      process.stderr.write(`Could not write ${cfg._path}: ${e.message}\n`);
+      process.exit(1);
+    }
+    process.stdout.write(`${cfg._path}\n${changes.map((c) => `  ${c}`).join("\n")}\n`);
+    process.exit(0);
+  }
+
   // The thresholds file is optional — everything runs on the defaults without
   // it. Create it on the way in, so "open the config" gives you something to
   // edit rather than an empty buffer.
@@ -472,6 +517,31 @@ if (cmd === "doctor") {
         ? d.detail
         : `on · ${d.detail}${cfg.notify?.bell ? ", with a sound" : ""}`;
 
+  // Whether the nudges are actually wired up. "Installed" and "working" are
+  // different states, and the gap between them is silent.
+  const hooks = (() => {
+    let settings = {};
+    try {
+      settings = JSON.parse(readFileSync(`${ROOT}/settings.json`, "utf8"));
+    } catch {
+      return "not installed — run `marmot init --hooks`";
+    }
+    const found = [];
+    for (const [event, groups] of Object.entries(settings.hooks ?? {})) {
+      for (const g of groups ?? []) {
+        for (const h of g.hooks ?? []) {
+          const cmd = String(h.command ?? "");
+          if (!cmd.includes("marmot")) continue;
+          const file = (cmd.match(/"([^"]+)"/) ?? [])[1];
+          found.push(`${event}${file && !existsSync(file) ? " (points at a missing file!)" : ""}`);
+        }
+      }
+    }
+    if (!found.length) return "not installed — run `marmot init --hooks`";
+    const missing = ["SessionStart", "Stop"].filter((e) => !found.some((f) => f.startsWith(e)));
+    return `${found.join(", ")}${missing.length ? ` — ${missing.join(" and ")} missing, run \`marmot init --hooks\`` : ""}`;
+  })();
+
   process.stdout.write(`
   Root            ${ROOT}
   Plan            ${(await import("../src/plan.mjs")).readPlan(ROOT).plan ?? "not detected — dollar figures are modelled at API rates"}
@@ -480,6 +550,7 @@ if (cmd === "doctor") {
   Priced turns    ${num(sessions.reduce((a, s) => a + s.pricedTurns, 0))} of ${num(t.turns)}
   Unpriced models ${unpriced.size ? [...unpriced].join(", ") : "none"}
   Sessions with 0 typed prompts  ${noPrompts}${noPrompts ? "  (resumed or agent-driven; not a fault)" : ""}
+  Nudge hooks     ${hooks}
   Notifications   ${notify}${d.channel === "macos" ? `\n                  If none arrive: check Focus is off, then allow notifications for\n                  that app in System Settings. notify.app posts as a different one.` : ""}
 
   Not readable here: lines added/removed (needs the diff), agent-active vs your
