@@ -314,7 +314,8 @@ them work.
 {
   // Which rules may interrupt you mid-session. Everything else waits
   // for the daily digest.
-  "live": ["session-cost", "daily-cost", "daily-baseline", "session-turns"],
+  "live": ["session-cost", "daily-cost", "daily-baseline",
+           "session-turns", "limit-reached"],
 
   // How a nudge reaches you, beyond the line in the transcript.
   // "app" overrides which macOS app posts the notification — see below.
@@ -322,6 +323,9 @@ them work.
 
   // "off" stops the daily digest entirely.
   "digest": { "cadence": "daily" },
+
+  // Marks on the way to your plan's limits. Each speaks once. See below.
+  "limits": { "enabled": true, "steps": [50, 75, 90] },
 
   // The report measures your MCP servers when it has nothing recent.
   // autoAudit false means it only ever measures when you ask it to.
@@ -336,8 +340,14 @@ them work.
 }
 ```
 
-`marmot config` writes every key with its default, commented by the table
-above — these are just the ones worth knowing about.
+`marmot config` writes every key with its default — these are the ones worth
+knowing about.
+
+**On a subscription, `limits` matters more than the cost caps.** `session.costCap`
+and `daily.costCap` are measured in modelled dollars, which is a good way to
+compare your own sessions and not a thing you are charged. The limit marks are
+the real ceiling. On pay-as-you-go it is the other way round: the dollars are
+the bill, and there is no limit to run out of.
 
 **Turning the alerts down.** `notify.bell` rings the terminal bell,
 `notify.desktop` raises a system notification. Set either to `false`.
@@ -404,7 +414,7 @@ And a "turn" means **a prompt you typed**. Tool results arrive as user entries t
 
 Everything runs locally. Nothing is uploaded, and there is no service to upload it to — no account, no API key, no server.
 
-The **report** reads only counts, identifiers and tool names, never your prompt or response text. The **browser page** does read them, because that is the point of it; `marmot browse --no-text` leaves the text out if you want to share it.
+The **report** reads only counts, identifiers and tool names, never your prompt or response text. To name your plan and its limits it reads `~/.claude.json`, taking the rate-limit tier and the cached utilisation percentages — never the email address, account ids or organisation name that sit beside them. The **browser page** does read them, because that is the point of it; `marmot browse --no-text` leaves the text out if you want to share it.
 
 Tool *results* are never stored — around 95% of the bytes on disk, and dropping them is what turns a 41MB transcript into a 1MB page.
 
