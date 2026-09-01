@@ -95,6 +95,11 @@ export function demoSessions() {
       tokens: { input: inp, output: outp, cacheRead: cr, cacheWrite: cw, thinking: think },
       toolCounts, skillCounts, mcpCounts, toolErrors: errs, totalToolCalls: calls,
       models: { [model]: cost }, filesTouched: [`src/${spec.repo}/handler.ts`, `src/${spec.repo}/handler.test.ts`],
+      modelTokens: { [model]: { input: inp, output: outp, cacheRead: cr, cacheWrite: cw, total: inp + outp + cr + cw } },
+      // A plausible prefix: system prompt, skills and tool definitions.
+      baselineTokens: 21_000 + Math.round(r() * 12_000),
+      dirTouches: { [`src/${spec.repo}`]: { dir: `src/${spec.repo}`, count: 2, firstTurn: 1, lastTurn: spec.turns } },
+      promptTimes: [],
       permissionModes: ["default"], cacheHitRate: seen ? cr / seen : null,
       // Aliases so the rules engine can read a demo session like a real one.
       mcpCalls: mcpCounts, skills: Object.keys(skillCounts),

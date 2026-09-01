@@ -289,7 +289,9 @@ if (cmd === "sessions") {
   process.exit(0);
 }
 
-process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO }));
+// Measured from the SKILL.md files on this machine. Demo runs read nothing.
+const SKILL_SIZES = DEMO ? {} : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
+process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES }));
 
 // `--sessions` and `--browse` are what make one command enough: the numbers,
 // every session behind them, and the full page when you want to dig in.

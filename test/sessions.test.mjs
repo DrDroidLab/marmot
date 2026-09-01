@@ -330,6 +330,96 @@ test("sidechain turns are counted separately", (t) => {
   assert.equal(s.sidechainTurns, 1);
 });
 
+test("tokens are attributed per model", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        response({ id: "m1", model: "claude-opus-5", u: usage({ input: 100, output: 200, cacheRead: 1000, write1h: 50 }), text: "a" }),
+        response({ id: "m2", model: "claude-opus-5", u: usage({ input: 100, output: 200, cacheRead: 1000, write1h: 50 }), text: "b" }),
+        response({ id: "m3", model: "claude-sonnet-5", u: usage({ input: 10, output: 20, cacheRead: 100, write1h: 5 }), text: "c" }),
+      ],
+    }),
+  );
+  assert.equal(s.modelTokens["claude-opus-5"].output, 400);
+  assert.equal(s.modelTokens["claude-opus-5"].total, 2 * (100 + 200 + 1000 + 50));
+  assert.equal(s.modelTokens["claude-sonnet-5"].total, 135);
+  // Per-model totals must add up to the session totals.
+  const summed = Object.values(s.modelTokens).reduce((a, m) => a + m.total, 0);
+  assert.equal(summed, s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite);
+});
+
+test("baseline context is the prefix carried into the first turn", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        prompt("go"),
+        // A fresh session writes the whole prefix to cache on turn one.
+        response({ id: "m1", u: usage({ input: 500, cacheRead: 0, write1h: 30_000, output: 100 }), text: "a" }),
+        response({ id: "m2", u: usage({ input: 20, cacheRead: 30_500, write1h: 200, output: 100 }), text: "b" }),
+      ],
+    }),
+  );
+  assert.equal(s.baselineTokens, 30_500, "input + cache read + cache write on the first turn");
+});
+
+test("baseline ignores sidechain turns, which carry a subagent's prefix", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        response({ id: "m0", u: usage({ input: 9, write1h: 1 }), text: "sub", sidechain: true }),
+        response({ id: "m1", u: usage({ input: 500, write1h: 30_000 }), text: "main" }),
+      ],
+    }),
+  );
+  assert.equal(s.baselineTokens, 30_500);
+});
+
+test("a session with no priced turns has no baseline rather than a zero", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(root, writeSession(root, { entries: [prompt("hi")] }));
+  assert.equal(s.baselineTokens, null);
+});
+
+test("directories touched are recorded with the turns they span", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        response({ id: "m1", u: usage({ output: 10 }), text: "a", over: { trackingPath: "/repo/src/billing/pay.ts" } }),
+        response({ id: "m2", u: usage({ output: 10 }), text: "b", over: { trackingPath: "/repo/src/billing/fee.ts" } }),
+        response({ id: "m3", u: usage({ output: 10 }), text: "c", over: { trackingPath: "/repo/infra/k8s/deploy.yaml" } }),
+      ],
+    }),
+  );
+  assert.deepEqual(Object.keys(s.dirTouches).sort(), ["/repo/infra/k8s", "/repo/src/billing"]);
+  assert.equal(s.dirTouches["/repo/src/billing"].count, 2);
+  assert.ok(s.dirTouches["/repo/infra/k8s"].firstTurn > s.dirTouches["/repo/src/billing"].firstTurn);
+});
+
+test("typed prompt timestamps are kept for the gap signal", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [prompt("one", { timestamp: "2026-09-01T10:00:00.000Z" }), prompt("two", { timestamp: "2026-09-01T12:30:00.000Z" })],
+    }),
+  );
+  assert.deepEqual(s.promptTimes, ["2026-09-01T10:00:00.000Z", "2026-09-01T12:30:00.000Z"]);
+});
+
 /* ── Discovery and windowing ───────────────────────────────────────────── */
 
 test("sessionFiles finds jsonl files and ignores everything else", (t) => {

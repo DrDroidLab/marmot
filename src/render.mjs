@@ -1,5 +1,6 @@
 import { byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins, dim, bold, warn, info } from "./format.mjs";
+import { skillCosts } from "./skills.mjs";
 
 const SHADOW =
   "Cost is a shadow price — what these tokens would have cost at published API rates. On a subscription plan it is not an invoice line. Right for comparing your own sessions, wrong for finance.";
@@ -28,7 +29,7 @@ function sparkline(values) {
 }
 
 export function totals(sessions) {
-  const t = { cost: 0, prompts: 0, turns: 0, sessions: sessions.length, toolCalls: 0, toolErrors: 0, tok: 0, cacheRead: 0, seen: 0, models: {} };
+  const t = { cost: 0, prompts: 0, turns: 0, sessions: sessions.length, toolCalls: 0, toolErrors: 0, tok: 0, cacheRead: 0, seen: 0, models: {}, modelTokens: {}, skills: {}, mcp: {}, baselines: [], promptCounts: [] };
   for (const s of sessions) {
     t.cost += s.cost;
     t.prompts += s.typedPrompts;
@@ -39,8 +40,15 @@ export function totals(sessions) {
     t.cacheRead += s.tokens.cacheRead;
     t.seen += s.tokens.cacheRead + s.tokens.cacheWrite + s.tokens.input;
     for (const [m, c] of Object.entries(s.models)) t.models[m] = (t.models[m] ?? 0) + c;
+    for (const [m, k] of Object.entries(s.modelTokens ?? {})) t.modelTokens[m] = (t.modelTokens[m] ?? 0) + (k.total ?? 0);
+    for (const name of s.skills ?? []) t.skills[name] = (t.skills[name] ?? 0) + 1;
+    for (const [srv, n] of Object.entries(s.mcpCalls ?? {})) t.mcp[srv] = (t.mcp[srv] ?? 0) + n;
+    if (typeof s.baselineTokens === "number") t.baselines.push(s.baselineTokens);
+    t.promptCounts.push(s.typedPrompts ?? 0);
   }
   t.cacheHitRate = t.seen ? t.cacheRead / t.seen : null;
+  t.baseline = t.baselines.length ? median(t.baselines) : null;
+  t.promptsPerSession = distribution(t.promptCounts);
   return t;
 }
 
@@ -59,7 +67,7 @@ export function renderSessionList(sessions, { heading = false } = {}) {
   return out.join("\n");
 }
 
-export function renderReport(sessions, cfg, { days, nudges, demo = false }) {
+export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {} }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"
     : "everything below was read from ~/.claude/projects on this machine";
@@ -75,12 +83,19 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false }) {
   const rows = [
     ["Spend", usd(t.cost), "modelled at published rates"],
     ["Sessions", num(t.sessions), `${days_.length} active day${days_.length === 1 ? "" : "s"}`],
-    ["Prompts you typed", num(t.prompts), t.sessions ? `${(t.prompts / t.sessions).toFixed(1)} per session` : ""],
+    [
+      "Prompts you typed",
+      num(t.prompts),
+      t.sessions ? `per session: ${t.promptsPerSession.mean.toFixed(1)} mean · ${num(t.promptsPerSession.median)} median · ${num(t.promptsPerSession.p99)} p99` : "",
+    ],
     ["Model turns", num(t.turns), t.prompts ? `${(t.turns / t.prompts).toFixed(1)} per prompt` : ""],
     ["Tokens", tokens(t.tok), "input, output and cache"],
     ["Cache hit rate", t.cacheHitRate === null ? "—" : pct(t.cacheHitRate), "higher is cheaper"],
     ["Tool calls", num(t.toolCalls), `${t.toolCalls ? pct(t.toolErrors / t.toolCalls) : "0%"} failed`],
   ];
+  if (t.baseline !== null) {
+    rows.push(["Baseline context", tokens(t.baseline), "median, before you type — prompt, skills, tool definitions"]);
+  }
   const pad = Math.max(...rows.map((r) => r[0].length));
   for (const [k, v, note] of rows) out.push(`  ${k.padEnd(pad)}  ${bold(String(v).padEnd(10))} ${dim(note)}`);
 
@@ -96,8 +111,28 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false }) {
     out.push("");
     out.push(bold("  Where it went"));
     for (const [m, c] of models) {
-      out.push(`  ${m.padEnd(pad)}  ${String(usd(c)).padEnd(10)} ${dim(pct(c / t.cost))}`);
+      const tk = t.modelTokens[m] ?? 0;
+      out.push(`  ${m.padEnd(pad)}  ${String(usd(c)).padEnd(10)} ${dim(`${pct(c / t.cost)}${tk ? ` · ${tokens(tk)} tokens` : ""}`)}`);
     }
+  }
+
+  const skills = skillCosts(t.skills, skillSizes);
+  const mcpRows = Object.entries(t.mcp).sort((a, b) => b[1] - a[1]);
+  // A long skill or server name must not knock the columns out of line.
+  const wide = Math.max(pad, ...skills.map((r) => r.name.length), ...mcpRows.map(([m]) => m.length), 0);
+  if (skills.length) {
+    out.push("");
+    out.push(bold("  Skills"));
+    for (const r of skills) {
+      const cost = r.known ? `~${tokens(r.onLoad)} tokens to load` : dim("size not readable — ships inside Claude Code");
+      out.push(`  ${r.name.padEnd(wide)}  ${String(`${r.calls}×`).padEnd(10)} ${dim(cost)}`);
+    }
+  }
+
+  if (mcpRows.length) {
+    out.push("");
+    out.push(bold("  MCP servers called"));
+    for (const [srv, n] of mcpRows) out.push(`  ${srv.padEnd(wide)}  ${String(`${n}×`).padEnd(10)}`);
   }
 
   out.push("");
@@ -111,6 +146,19 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false }) {
 function median(a) {
   const s = [...a].sort((x, y) => x - y);
   return s.length ? s[Math.floor(s.length / 2)] : 0;
+}
+
+/** Mean, median and p99 — the shape of a distribution, not just its average. */
+export function distribution(values) {
+  const v = [...values].sort((x, y) => x - y);
+  if (!v.length) return { mean: 0, median: 0, p99: 0, max: 0 };
+  const at = (q) => v[Math.min(v.length - 1, Math.ceil(q * v.length) - 1)];
+  return {
+    mean: v.reduce((a, x) => a + x, 0) / v.length,
+    median: median(v),
+    p99: at(0.99),
+    max: v[v.length - 1],
+  };
 }
 
 export function renderNudges({ sessionNudges, windowNudges }, { heading = false, compact = false } = {}) {

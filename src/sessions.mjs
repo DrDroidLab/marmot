@@ -103,6 +103,14 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
     compactions: 0,
     models: {},
     modelTurns: {},
+    modelTokens: {},
+    // The prefix carried into the first request: system prompt, CLAUDE.md,
+    // every skill description and every attached tool definition. It is what
+    // you pay before typing anything, and it rides on every later turn.
+    baselineTokens: null,
+    // Ordered enough to tell whether a long session stayed on one thing.
+    dirTouches: {},
+    promptTimes: [],
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, thinking: 0 },
     cost: 0,
     pricedTurns: 0,
@@ -125,9 +133,20 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
     s.gitBranch ??= o.gitBranch ?? null;
     s.version ??= o.version ?? null;
     if (o.permissionMode) s.permissionModes.add(o.permissionMode);
-    if (o.trackingPath) s.filesTouched.add(o.trackingPath);
+    if (o.trackingPath) {
+      s.filesTouched.add(o.trackingPath);
+      // Which area of the tree, and when — the raw material for judging whether
+      // one long session was really several.
+      const dir = o.trackingPath.split("/").slice(0, -1).join("/") || "/";
+      const d = (s.dirTouches[dir] ??= { dir, count: 0, firstTurn: s.assistantTurns, lastTurn: s.assistantTurns });
+      d.count += 1;
+      d.lastTurn = s.assistantTurns;
+    }
     if (o.isCompactSummary || o.subtype === "compact_boundary") s.compactions += 1;
-    if (isTypedPrompt(o, fileHasPromptSource)) s.typedPrompts += 1;
+    if (isTypedPrompt(o, fileHasPromptSource)) {
+      s.typedPrompts += 1;
+      if (o.timestamp) s.promptTimes.push(o.timestamp);
+    }
 
     const msg = o.message;
     if (!msg) continue;
@@ -142,11 +161,29 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
       if (msg.model) s.modelTurns[msg.model] = (s.modelTurns[msg.model] ?? 0) + 1;
 
       const cc = u.cache_creation ?? {};
-      s.tokens.input += u.input_tokens ?? 0;
-      s.tokens.output += u.output_tokens ?? 0;
-      s.tokens.cacheRead += u.cache_read_input_tokens ?? 0;
-      s.tokens.cacheWrite += u.cache_creation_input_tokens ?? (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
+      const inTok = u.input_tokens ?? 0;
+      const outTok = u.output_tokens ?? 0;
+      const readTok = u.cache_read_input_tokens ?? 0;
+      const writeTok = u.cache_creation_input_tokens ?? (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
+      s.tokens.input += inTok;
+      s.tokens.output += outTok;
+      s.tokens.cacheRead += readTok;
+      s.tokens.cacheWrite += writeTok;
       s.tokens.thinking += u.output_tokens_details?.thinking_tokens ?? 0;
+
+      if (msg.model) {
+        const mt = (s.modelTokens[msg.model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+        mt.input += inTok;
+        mt.output += outTok;
+        mt.cacheRead += readTok;
+        mt.cacheWrite += writeTok;
+        mt.total += inTok + outTok + readTok + writeTok;
+      }
+
+      // First priced turn only: everything the model was sent before the
+      // conversation itself. On a resumed session this carries earlier turns
+      // too, which is why it is reported as a floor rather than an exact split.
+      if (s.baselineTokens === null && !o.isSidechain) s.baselineTokens = inTok + readTok + writeTok;
 
       const c = turnCost(u, msg.model, rateOverrides);
       if (c === null) {
