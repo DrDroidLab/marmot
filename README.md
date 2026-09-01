@@ -21,12 +21,59 @@ Marmot reads the session records Claude Code already writes to your disk, finds
 those patterns, and interrupts you at the point where stopping is still worth
 something. Same tokens your plan limits are counted in.
 
-```bash
-npx @drdroidlab/marmot --demo      # see the nudges on synthetic data
-npx @drdroidlab/marmot             # then on your own
+Node 18+, zero dependencies, entirely local. Works on **all Claude plans**.
+
+---
+
+## Install
+
+**As a Claude Code plugin** — the way to run it, and the only way the
+mid-session nudges can reach you at all.
+
+```
+/plugin marketplace add DrDroidLab/marmot
+/plugin install marmot@marmot
 ```
 
-Node 18+, zero dependencies, entirely local. Works on **all Claude plans**.
+Then **restart Claude Code** — hooks and commands only load at session start. You get:
+
+- **Live nudges** at the end of a turn, for the rules in `live` — the ones you
+  can still act on. Once per rule, again at each doubling for cost, with a bell
+  and a desktop notification so they do not scroll past.
+- **A daily digest** on your first session each day: what yesterday cost, and
+  what it flagged.
+- `/marmot:usage` — everything, on demand.
+- `/marmot:config` — move a threshold.
+
+Check it loaded — the status line, not the component count:
+
+```bash
+claude plugin list | grep -A4 'marmot@'    # Status: ✔ enabled
+```
+
+**As a CLI**, for the commands the plugin does not expose — `browse`,
+`mcp-audit`, `doctor`:
+
+```bash
+git clone https://github.com/DrDroidLab/marmot && cd marmot
+node bin/marmot.mjs --demo      # see the nudges on synthetic data
+node bin/marmot.mjs             # then on your own
+```
+
+No install step and no dependencies to fetch — it is plain Node.
+
+**The statusline** — plugins can't ship one, so it's a separate opt-in.
+
+```bash
+node bin/marmot.mjs init --statusline
+```
+
+```
+$12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
+```
+
+The `▲` appears once you're past your own caps — the cheapest possible reminder,
+always in view.
 
 ---
 
@@ -64,14 +111,13 @@ you**, and every threshold is yours to move.
 
 ## When it reaches you
 
-Timing is the whole point, so you choose which rules speak when:
+Timing is the whole point, and you choose which rules speak when. The `live`
+list interrupts mid-session — the only moment you can still change course on the
+session you are in. Everything else waits for the daily digest, because a nudge
+you cannot act on right now is an interruption rather than a nudge.
 
-- **Mid-session**, at the end of a turn, for the rules in `live` — the only
-  moment you can still change course. Once per rule, again at each doubling for
-  cost, with a bell and a notification so it does not scroll past.
-- **Once a day** for everything else. A nudge you cannot act on right now is an
-  interruption, not a nudge.
-- **In the statusline**, if you want it always in view.
+Each one speaks once per session, again at each doubling for cost, and at each
+mark you pass on the way to a limit.
 
 ## The evidence behind every nudge
 
@@ -162,52 +208,6 @@ other, wrong for finance.
 
 ---
 
-## Install
-
-**As a CLI**
-
-```bash
-npx @drdroidlab/marmot            # no install
-npm i -g @drdroidlab/marmot       # or keep it
-```
-
-**As a Claude Code plugin** — this is the one that saves you tokens, because it
-is the only way the mid-session nudges can reach you at all.
-
-```
-/plugin marketplace add DrDroidLab/marmot
-/plugin install marmot@marmot
-```
-
-Then **restart Claude Code** — hooks and commands only load at session start. You get:
-
-- **Live nudges** at the end of a turn, for the rules in `live` — the ones you
-  can still act on. Once per session per rule, again at each doubling for cost,
-  with a bell and a desktop notification so they do not scroll past.
-- **A daily digest** on your first session each day: what yesterday cost, and
-  what it flagged.
-- `/marmot:usage` — everything, on demand.
-- `/marmot:config` — move a threshold.
-
-Check it loaded — the status line, not the component count:
-
-```bash
-claude plugin list | grep -A4 'marmot@'    # Status: ✔ enabled
-```
-
-**The statusline** — plugins can't ship one, so it's a separate opt-in.
-
-```bash
-npx @drdroidlab/marmot init --statusline
-```
-
-```
-$12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
-```
-
-The `▲` appears once you're past your own caps — the cheapest possible reminder,
-always in view.
-
 ## Usage
 
 | Command | Slash command | What it does |
@@ -256,7 +256,7 @@ on *every* request rather than once. Nothing on disk records how big those tool
 definitions are, so Marmot asks the servers directly:
 
 ```bash
-npx @drdroidlab/marmot mcp-audit
+node bin/marmot.mjs mcp-audit
 ```
 
 ```
