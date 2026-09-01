@@ -56,6 +56,10 @@ if (has("help") || cmd === "help") {
     --demo            Run against synthetic sessions, not your own
     --statusline      With init: also install the statusline
 
+  report only
+    --sessions        List every session in the window under the report
+    --browse          Also build and open the session browser page
+
   config only
     --print           Also print the file to the terminal
     --no-open         Show the path, do not open it
@@ -67,7 +71,8 @@ if (has("help") || cmd === "help") {
     --no-text         Leave prompt and response text out of the page
     --no-open         Write it, do not open it
 
-  Nothing here uploads, and no prompt or response text is ever read.
+  Nothing here uploads. The report reads only counts, identifiers and tool
+  names; browse reads your prompts and replies, into a local file.
 `);
   process.exit(0);
 }
@@ -290,7 +295,9 @@ if (cmd === "sessions") {
 }
 
 // Measured from the SKILL.md files on this machine. Demo runs read nothing.
-const SKILL_SIZES = DEMO ? {} : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
+const SKILL_SIZES = DEMO
+  ? (await import("../src/demo.mjs")).demoSkillSizes
+  : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
 process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES }));
 
 // `--sessions` and `--browse` are what make one command enough: the numbers,

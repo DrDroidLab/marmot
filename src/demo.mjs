@@ -37,6 +37,17 @@ const REPLIES = [
   "Added the case and it fails against current main, which is what we want before the fix.",
 ];
 
+/**
+ * Sizes for the demo's skills. Real skill sizes are measured from the SKILL.md
+ * files on disk; a demo run reads nothing from this machine, so it carries its
+ * own plausible figures rather than reporting every skill as unmeasurable.
+ */
+export const demoSkillSizes = {
+  "code-review": { name: "code-review", always: 22, onLoad: 1840 },
+  dataviz: { name: "dataviz", always: 31, onLoad: 4120 },
+  run: { name: "run", always: 18, onLoad: 960 },
+};
+
 export function demoSessions() {
   const r = rng(20260901);
   const out = [];

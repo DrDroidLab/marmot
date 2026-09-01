@@ -26,14 +26,29 @@ Node 18+, zero dependencies, entirely local. Works on **Pro, Max and Team** plan
 
   Spend              $4,184     modelled at published rates
   Sessions           40         18 active days
-  Prompts you typed  926        23.1 per session
+  Prompts you typed  926        per session: 23.1 mean · 16 median · 79 p99
   Model turns        13,823     14.9 per prompt
   Tokens             5.8B       input, output and cache
   Cache hit rate     98%        higher is cheaper
   Tool calls         13,768     3% failed
+  Baseline context   35.3K      median, before you type — prompt, skills, tool definitions
 
   Daily              ▃▂▄▁▃█▆▃▂▁▄▁▂▆▁▅▄▅  peak $671 · median $233
+
+  Where it went
+  claude-opus-5      $4,092     98% · 5.7B tokens
+  claude-sonnet-5    $92        2% · 104M tokens
+
+  Skills
+  dataviz            6×         ~4.1K tokens to load
+  code-review        5×         ~1.8K tokens to load
+
+  MCP servers called
+  github             70×
+  sentry             12×
 ```
+
+**Baseline context** is the prefix carried into every request before you type anything — system prompt, skill descriptions and every attached tool definition. It is the number to look at when you wonder what an idle MCP server is costing you.
 
 Spend is a **shadow price** — what these tokens would have cost at published API rates. On a subscription plan it is not an invoice line. Right for comparing your own sessions to each other, wrong for finance.
 
@@ -48,14 +63,25 @@ npx @drdroidlab/marmot            # no install
 npm i -g @drdroidlab/marmot       # or keep it
 ```
 
-**As a Claude Code plugin** — adds the slash commands, plus nudges where you already are.
+**As a Claude Code plugin** — the same numbers, without leaving Claude Code.
 
 ```
 /plugin marketplace add DrDroidLab/marmot
 /plugin install marmot@marmot
 ```
 
-Then restart Claude Code; hooks and commands load at session start.
+Then **restart Claude Code** — hooks and commands only load at session start. You get:
+
+- `/marmot:usage` — the report, every session, and the nudges.
+- `/marmot:config` — open your thresholds file.
+- **A daily digest** on your first session each day: what yesterday cost, and what it flagged.
+- **Live nudges** at the end of a turn, for the rules in `live` only — once per session per rule, and again at each doubling for cost. Each one rings the bell and raises a desktop notification.
+
+Check it loaded — the status line, not the component count:
+
+```bash
+claude plugin list | grep -A4 'marmot@'    # Status: ✔ enabled
+```
 
 **The statusline** — plugins can't ship one, so it's a separate opt-in.
 
@@ -106,13 +132,18 @@ One self-contained HTML file, written locally and opened in your browser — no 
 
 ## Configuration
 
-Defaults are deliberately quiet, so this is optional. To move a threshold:
+Everything runs on defaults, so this is optional. When you do want to move a
+threshold:
 
 ```bash
-marmot config        # opens ~/.claude/marmot.json, creating it if you have none
+marmot config          # opens ~/.claude/marmot.json, creating it if you have none
+marmot config --print  # ...and print it to the terminal
 ```
 
-or `/marmot:config` inside Claude Code.
+or `/marmot:config` inside Claude Code. Nothing needs restarting — the next run
+reads it.
+
+### The nudge thresholds
 
 | Rule | Fires when | Default |
 |---|---|---|
@@ -125,14 +156,43 @@ or `/marmot:config` inside Claude Code.
 | `tool-errors` | Failed tool calls | > 10% over ≥ 20 calls |
 | `mcp-idle` | Servers configured and never invoked | any |
 
-Four other keys are worth knowing:
+If a rule fires on nearly every session, **raise its cap rather than removing
+it**. Every rule carries three guards — a ratio gap, a minimum sample and a
+dollar floor — because a nudge that always fires gets muted, and then none of
+them work.
 
-- **`live`** — which rules may interrupt you mid-session. Everything else waits for the daily digest.
-- **`rateOverrides`** — set these if you're on negotiated rates and want the modelled cost to match your contract.
-- **`digest.cadence`** — set to `"off"` to stop the daily digest.
-- **`notify`** — `{ "desktop": true, "bell": true }`. A nudge rings the terminal bell and raises a desktop notification, so it lands while you can still act on it. Turn either off here. `MARMOT_NO_NOTIFY=1` silences both, and CI is silent automatically.
+### The keys people actually change
 
-If a rule fires on nearly every session, raise its cap rather than removing it. Every rule carries three guards — a ratio gap, a minimum sample and a dollar floor — because a nudge that always fires gets muted, and then none of them work.
+```jsonc
+{
+  // Which rules may interrupt you mid-session. Everything else waits
+  // for the daily digest.
+  "live": ["session-cost", "daily-cost", "daily-baseline", "session-turns"],
+
+  // How a nudge reaches you, beyond the line in the transcript.
+  "notify": { "desktop": true, "bell": true },
+
+  // "off" stops the daily digest entirely.
+  "digest": { "cadence": "daily" },
+
+  "session": { "costCap": 25, "turnCap": 20, "costFloor": 1 },
+  "daily":   { "costCap": 50, "baselineSigma": 2.5, "baselineDays": 14 },
+
+  // Set these if you are on negotiated rates and want the modelled
+  // cost to match your contract. USD per million tokens.
+  "rateOverrides": { "claude-opus-5": { "in": 5, "out": 25 } }
+}
+```
+
+`marmot config` writes every key with its default, commented by the table
+above — these are just the ones worth knowing about.
+
+**Turning the alerts down.** `notify.bell` rings the terminal bell,
+`notify.desktop` raises a system notification. Set either to `false`.
+`MARMOT_NO_NOTIFY=1` silences both for one run, and CI is silent automatically.
+
+**Starting the nudges over.** `~/.claude/marmot-state.json` records what has
+already been said. Delete it to hear everything again.
 
 ## How the numbers are counted
 
