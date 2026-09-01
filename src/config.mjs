@@ -30,6 +30,21 @@ export const DEFAULTS = {
     costCap: 25,
     // Below this a session is too small to be worth a word about.
     costFloor: 1,
+
+    // Whether one long session was really several. Judged from the directories
+    // it edited and the gaps between prompts — never from prompt text, and
+    // never by asking a model.
+    topicMinPrompts: 15,
+    // Two areas is enough once a day has passed between them.
+    topicMinAreas: 2,
+    // An area touched once is a passing glance, not a strand of work.
+    topicMinTouches: 2,
+    // Depth of the path that makes an "area". At 1, falcon/app and falcon/lib
+    // are one project rather than two strands; raise it to 2 on a repo where
+    // everything lives under a single src/.
+    topicDepth: 1,
+    // A day. Shorter gaps are lunch, not a change of subject.
+    topicGapMins: 1440,
   },
 
   daily: {
@@ -52,6 +67,9 @@ export const DEFAULTS = {
     lightWorkExtensions: [".md", ".mdx", ".txt", ".rst"],
     lightWorkDirs: ["test", "tests", "spec", "specs", "__tests__", "doc", "docs"],
     lightWorkFilePatterns: ["^test_", "_test\\.[a-z]+$", "\\.(test|spec)\\.[a-z]+$"],
+    // One light session on a premium model is a choice; a habit of them is a
+    // pattern worth naming once, across the window.
+    lightWorkMinSessions: 5,
   },
 
   // How a nudge reaches you, beyond the line in the transcript. Both on to

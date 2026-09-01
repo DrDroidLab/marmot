@@ -11,7 +11,7 @@
  */
 
 import { configuredServers, byDay } from "./sessions.mjs";
-import { usd, pct } from "./format.mjs";
+import { usd, pct, num, tokens, mins } from "./format.mjs";
 
 const premiumCost = (s, cfg) =>
   Object.entries(s.models)
@@ -31,6 +31,64 @@ const isLightPath = (p, cfg) => {
   if (segments.slice(0, -1).some((seg) => cfg.models.lightWorkDirs.includes(seg))) return true;
   return cfg.models.lightWorkFilePatterns.some((rx) => new RegExp(rx).test(base));
 };
+
+/**
+ * The areas of the tree a session worked in, oldest first.
+ *
+ * Three things this has to get right, each found by reading real output:
+ * work outside the working directory (scratch files in /private/tmp, a stray
+ * edit in another repo) is noise rather than an area; `backend` and
+ * `backend/app` are one strand of work, not two; and an area touched once is a
+ * passing glance. Without all three the rule reports six "separate" areas for a
+ * session that only ever worked on one.
+ */
+export function areasOf(s, cfg) {
+  const cwd = s.cwd;
+  if (!cwd) return []; // nothing to measure paths against
+  const groups = new Map();
+  for (const d of Object.values(s.dirTouches ?? {})) {
+    // `trackingPath` is written relative to the working directory. An absolute
+    // one means the edit landed outside the repo — a scratch file, another
+    // checkout — which is noise rather than an area of this session's work.
+    let rel;
+    if (d.dir.startsWith("/")) {
+      if (!d.dir.startsWith(cwd)) continue;
+      rel = d.dir.slice(cwd.length);
+    } else {
+      rel = d.dir;
+    }
+    rel = rel.replace(/^\/+/, "");
+    const area = rel.split("/").filter(Boolean).slice(0, cfg.session.topicDepth).join("/") || ".";
+    const g = groups.get(area) ?? { area, count: 0, firstTurn: Infinity, lastTurn: -Infinity };
+    g.count += d.count;
+    g.firstTurn = Math.min(g.firstTurn, d.firstTurn);
+    g.lastTurn = Math.max(g.lastTurn, d.lastTurn);
+    groups.set(area, g);
+  }
+
+  // Fold a nested area into its parent: editing backend/app is still backend.
+  for (const [name, g] of [...groups]) {
+    const parent = [...groups.keys()].find((k) => k !== name && name.startsWith(`${k}/`));
+    if (!parent) continue;
+    const p = groups.get(parent);
+    p.count += g.count;
+    p.firstTurn = Math.min(p.firstTurn, g.firstTurn);
+    p.lastTurn = Math.max(p.lastTurn, g.lastTurn);
+    groups.delete(name);
+  }
+
+  return [...groups.values()].sort((a, b) => a.firstTurn - b.firstTurn);
+}
+
+/** The longest pause between two prompts you typed, in minutes. */
+export function longestGapMins(times = []) {
+  let max = 0;
+  for (let i = 1; i < times.length; i += 1) {
+    const gap = (new Date(times[i]) - new Date(times[i - 1])) / 60000;
+    if (Number.isFinite(gap) && gap > max) max = gap;
+  }
+  return max;
+}
 
 /** Rules that judge one session on its own. */
 export const sessionRules = [
@@ -98,6 +156,33 @@ export const sessionRules = [
     },
   },
   {
+    id: "session-topics",
+    label: "One session, resumed across days",
+    check(s, cfg) {
+      if (s.cost < cfg.session.costFloor) return null;
+      if (s.typedPrompts < cfg.session.topicMinPrompts) return null;
+      // A session that compacted has already dropped what it no longer needs.
+      if (s.compactions > 0) return null;
+
+      // The signal that actually holds on real sessions. Sequencing does not:
+      // people work across a tree at once, so backend and frontend edited in
+      // step is one task, not two. A long gap is different — you came back to
+      // a context built for something you had already finished.
+      const gap = longestGapMins(s.promptTimes);
+      if (gap < cfg.session.topicGapMins) return null;
+
+      const areas = areasOf(s, cfg).filter((a) => a.count >= cfg.session.topicMinTouches);
+      if (areas.length < cfg.session.topicMinAreas) return null;
+
+      const listed = areas.slice(0, 4).map((a) => a.area).join(", ");
+      return {
+        detail: `${s.typedPrompts} prompts and ${usd(s.cost)} in one session, with a ${mins(gap)} gap between prompts and work in ${areas.length} areas: ${listed}.`,
+        action:
+          "Everything from before the gap is still in context after it, and paid for on every turn since. When you come back to a different piece of work, a fresh session costs nothing to start.",
+      };
+    },
+  },
+  {
     id: "tool-errors",
     label: "High tool error rate",
     check(s, cfg) {
@@ -112,7 +197,7 @@ export const sessionRules = [
 ];
 
 /** Rules that need the whole window rather than one session. */
-export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride } = {}) {
+export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null } = {}) {
   const out = [];
   const days = byDay(sessions);
   const todayRow = days.find((d) => d.day === today);
@@ -145,18 +230,54 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
     }
   }
 
+  // A habit, rather than one session. The per-session rule already names each
+  // one; this says the pattern out loud, with what it added up to.
+  const lightPremium = sessions.filter((s) => {
+    if (!s.models || s.cost < cfg.session.costFloor) return null;
+    const share = s.cost ? premiumCost(s, cfg) / s.cost : 0;
+    return share >= cfg.models.premiumShare && s.totalToolCalls < cfg.models.lightWorkToolCalls;
+  });
+  if (lightPremium.length >= cfg.models.lightWorkMinSessions) {
+    const spend = lightPremium.reduce((a, s) => a + s.cost, 0);
+    out.push({
+      id: "premium-window",
+      label: "A habit of premium models on small sessions",
+      detail: `${lightPremium.length} of ${sessions.length} sessions ran on a premium model while making fewer than ${cfg.models.lightWorkToolCalls} tool calls each, ${usd(spend)} in total.`,
+      action:
+        "One light session on the best model is a choice; a standing habit is worth a default. Claude Sonnet 5 handles work this size, and you can escalate the moment it stalls.",
+      sessions: lightPremium.map((s) => s.id),
+    });
+  }
+
   // Skipped when the caller passed lightweight records: an absent `mcpCalls`
   // would make every configured server look idle.
   if (cfg.mcp.enabled && includeMcp) {
-    const configured = configuredOverride ?? configuredServers(root);
+    const configured = configuredOverride ?? configuredServers(root, cwd);
     const called = new Set(sessions.flatMap((s) => Object.keys(s.mcpCalls ?? {})));
     const idle = configured.filter((c) => !called.has(c));
     if (idle.length) {
+      // `marmot mcp-audit` measures what each server's definitions cost. If it
+      // has been run, quote the real figure rather than gesturing at it.
+      const measured = idle.map((n) => mcpSizes?.servers?.[n]).filter((m) => m && !m.error && m.tokens);
+      const idleTokens = measured.reduce((a, m) => a + m.tokens, 0);
+      const baselines = sessions.map((s) => s.baselineTokens).filter((n) => typeof n === "number");
+      const baseline = baselines.length ? baselines.sort((a, b) => a - b)[Math.floor(baselines.length / 2)] : null;
+
+      let detail = `${idle.join(", ")} — configured, and not invoked once in this window.`;
+      if (idleTokens) {
+        detail += ` Their tool definitions are ~${num(idleTokens)} tokens, sent with every request`;
+        detail += baseline ? ` — ${pct(idleTokens / baseline)} of your ${tokens(baseline)} median session prefix.` : ".";
+      } else if (baseline) {
+        detail += ` Your median session carries ${tokens(baseline)} of prefix before you type; every attached server's definitions ride inside it.`;
+      }
+
       out.push({
         id: "mcp-idle",
         label: "MCP servers attached but never called",
-        detail: `${idle.join(", ")} — configured, and not invoked once in this window.`,
-        action: "Every attached server's tool definitions are sent with each request. Detaching what you do not use is a straight saving.",
+        detail,
+        action: idleTokens
+          ? "Detaching what you do not use is a straight saving on every request."
+          : "Every attached server's tool definitions are sent with each request. `marmot mcp-audit` measures exactly what each one costs.",
         sessions: [],
       });
     }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sessionRules, windowRules, evaluate } from "../src/rules.mjs";
+import { sessionRules, windowRules, evaluate, areasOf, longestGapMins } from "../src/rules.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { fakeSession } from "./helpers.mjs";
 
@@ -145,6 +145,114 @@ test("every rule returns the same shape", () => {
   }
 });
 
+/* ── session-topics ────────────────────────────────────────────────────── */
+
+const dirs = (spec) => Object.fromEntries(Object.entries(spec).map(([dir, v]) => [dir, { dir, ...v }]));
+const daysApart = (n) => ["2026-09-01T09:00:00.000Z", new Date(Date.parse("2026-09-01T09:00:00.000Z") + n * 86_400_000).toISOString()];
+
+test("areasOf groups by top-level directory, relative to the working directory", () => {
+  const s = fakeSession({
+    cwd: "/repo",
+    dirTouches: dirs({ "backend/app": { count: 4, firstTurn: 1, lastTurn: 40 }, "backend/lib": { count: 2, firstTurn: 5, lastTurn: 30 }, frontend: { count: 3, firstTurn: 50, lastTurn: 90 } }),
+  });
+  const areas = areasOf(s, cfg);
+  assert.deepEqual(areas.map((a) => a.area), ["backend", "frontend"]);
+  assert.equal(areas[0].count, 6, "backend/app and backend/lib are one project");
+  assert.equal(areas[0].lastTurn, 40);
+});
+
+test("areasOf ignores edits outside the working directory", () => {
+  // Scratch files and other checkouts are recorded as absolute paths. They are
+  // noise, not an area of this session's work.
+  const s = fakeSession({
+    cwd: "/repo",
+    dirTouches: dirs({ backend: { count: 3, firstTurn: 1, lastTurn: 10 }, "/private/tmp": { count: 5, firstTurn: 2, lastTurn: 8 }, "/Users/me/other": { count: 4, firstTurn: 3, lastTurn: 9 } }),
+  });
+  assert.deepEqual(areasOf(s, cfg).map((a) => a.area), ["backend"]);
+});
+
+test("areasOf on a session with no working directory judges nothing", () => {
+  assert.deepEqual(areasOf(fakeSession({ cwd: null, dirTouches: dirs({ a: { count: 9, firstTurn: 1, lastTurn: 2 } }) }), cfg), []);
+});
+
+test("longestGapMins finds the biggest pause, and copes with junk", () => {
+  assert.equal(longestGapMins(["2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", "2026-09-03T10:30:00Z"]), 2880);
+  assert.equal(longestGapMins([]), 0);
+  assert.equal(longestGapMins(["2026-09-01T10:00:00Z"]), 0);
+  assert.equal(longestGapMins(["not a date", "also not"]), 0);
+});
+
+const topics = (over) => check("session-topics", over);
+
+test("session-topics fires on a long session resumed days later in another area", () => {
+  const hit = topics({
+    typedPrompts: 30,
+    cost: 80,
+    compactions: 0,
+    cwd: "/repo",
+    promptTimes: daysApart(3),
+    dirTouches: dirs({ backend: { count: 4, firstTurn: 1, lastTurn: 40 }, frontend: { count: 3, firstTurn: 50, lastTurn: 90 } }),
+  });
+  assert.ok(hit);
+  assert.match(hit.detail, /3\.0d gap/);
+  assert.match(hit.detail, /2 areas: backend, frontend/);
+  assert.match(hit.action, /still in context/);
+});
+
+test("session-topics stays quiet without a real gap", () => {
+  // Same session, resumed after lunch rather than after a day.
+  assert.equal(
+    topics({
+      typedPrompts: 30,
+      cost: 80,
+      cwd: "/repo",
+      promptTimes: ["2026-09-01T10:00:00Z", "2026-09-01T11:00:00Z"],
+      dirTouches: dirs({ backend: { count: 4, firstTurn: 1, lastTurn: 40 }, frontend: { count: 3, firstTurn: 50, lastTurn: 90 } }),
+    }),
+    null,
+  );
+});
+
+test("session-topics stays quiet when the gap led back to the same work", () => {
+  assert.equal(
+    topics({
+      typedPrompts: 30,
+      cost: 80,
+      cwd: "/repo",
+      promptTimes: daysApart(3),
+      dirTouches: dirs({ backend: { count: 9, firstTurn: 1, lastTurn: 90 } }),
+    }),
+    null,
+    "one area is one piece of work, however long you took over it",
+  );
+});
+
+test("session-topics carries the three guards", () => {
+  const base = {
+    typedPrompts: 30,
+    cost: 80,
+    cwd: "/repo",
+    promptTimes: daysApart(3),
+    dirTouches: dirs({ backend: { count: 4, firstTurn: 1, lastTurn: 40 }, frontend: { count: 3, firstTurn: 50, lastTurn: 90 } }),
+  };
+  assert.equal(topics({ ...base, typedPrompts: 5 }), null, "too few prompts");
+  assert.equal(topics({ ...base, cost: 0.2 }), null, "below the dollar floor");
+  assert.equal(topics({ ...base, compactions: 2 }), null, "it already reset its context");
+});
+
+test("session-topics ignores an area only glanced at", () => {
+  assert.equal(
+    topics({
+      typedPrompts: 30,
+      cost: 80,
+      cwd: "/repo",
+      promptTimes: daysApart(3),
+      dirTouches: dirs({ backend: { count: 9, firstTurn: 1, lastTurn: 90 }, docs: { count: 1, firstTurn: 44, lastTurn: 44 } }),
+    }),
+    null,
+  );
+});
+
 /* ── window rules ──────────────────────────────────────────────────────── */
 
 const day = (d, cost) => fakeSession({ id: `s-${d}-${cost}`, day: d, cost });
@@ -219,6 +327,55 @@ test("mcp-idle is skipped for lightweight records that carry no mcpCalls", () =>
   // Without the guard, an absent field makes every configured server look idle.
   const out = windowRules([{ day: "2026-09-01", cost: 1 }], cfg, { today: "2026-09-01", includeMcp: false, configured: ["github"] });
   assert.equal(out.find((w) => w.id === "mcp-idle"), undefined);
+});
+
+test("premium-window names a habit rather than one session", () => {
+  const light = (id) => fakeSession({ id, day: "2026-08-20", cost: 5, models: { "claude-opus-5": 5 }, totalToolCalls: 4 });
+  const sessions = [light("a"), light("b"), light("c"), light("d"), light("e"), fakeSession({ id: "big", cost: 50, totalToolCalls: 500 })];
+  const hit = windowRules(sessions, cfg, { today: "2026-09-01", includeMcp: false }).find((w) => w.id === "premium-window");
+  assert.ok(hit);
+  assert.match(hit.detail, /5 of 6 sessions/);
+  assert.match(hit.detail, /\$25\.00 in total/);
+  assert.equal(hit.sessions.length, 5, "the sessions behind it are traceable");
+});
+
+test("premium-window needs a habit, not one or two sessions", () => {
+  const light = (id) => fakeSession({ id, cost: 5, models: { "claude-opus-5": 5 }, totalToolCalls: 4 });
+  assert.equal(windowRules([light("a"), light("b")], cfg, { today: "2026-09-01", includeMcp: false }).find((w) => w.id === "premium-window"), undefined);
+});
+
+test("premium-window ignores sessions that did real work", () => {
+  const heavy = (id) => fakeSession({ id, cost: 20, models: { "claude-opus-5": 20 }, totalToolCalls: 200 });
+  const sessions = [heavy("a"), heavy("b"), heavy("c"), heavy("d"), heavy("e"), heavy("f")];
+  assert.equal(windowRules(sessions, cfg, { today: "2026-09-01", includeMcp: false }).find((w) => w.id === "premium-window"), undefined);
+});
+
+test("mcp-idle quotes measured tokens once an audit has been run", () => {
+  const sessions = [fakeSession({ mcpCalls: { github: 4 }, baselineTokens: 40_000 })];
+  const hit = windowRules(sessions, cfg, {
+    today: "2026-09-01",
+    configured: ["github", "sentry"],
+    mcpSizes: { servers: { sentry: { count: 14, tokens: 4000 } } },
+  }).find((w) => w.id === "mcp-idle");
+  assert.ok(hit);
+  assert.match(hit.detail, /~4,000 tokens/);
+  assert.match(hit.detail, /10% of your 40\.0K median session prefix/);
+  assert.match(hit.action, /straight saving/);
+});
+
+test("mcp-idle falls back to the baseline when nothing has been measured", () => {
+  const sessions = [fakeSession({ mcpCalls: {}, baselineTokens: 35_000 })];
+  const hit = windowRules(sessions, cfg, { today: "2026-09-01", configured: ["sentry"] }).find((w) => w.id === "mcp-idle");
+  assert.ok(hit);
+  assert.match(hit.detail, /35\.0K of prefix/);
+  assert.match(hit.action, /mcp-audit/, "and says how to get the real number");
+});
+
+test("mcp-idle says the plain thing when there is no baseline either", () => {
+  const sessions = [fakeSession({ mcpCalls: {}, baselineTokens: null })];
+  const hit = windowRules(sessions, cfg, { today: "2026-09-01", configured: ["sentry"] }).find((w) => w.id === "mcp-idle");
+  assert.ok(hit);
+  assert.match(hit.detail, /not invoked once/);
 });
 
 /* ── evaluate ──────────────────────────────────────────────────────────── */

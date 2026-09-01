@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { turnCost } from "./pricing.mjs";
+import { readServerConfigs } from "./mcp.mjs";
 
 export const defaultRoot = () => join(homedir(), ".claude");
 
@@ -242,21 +243,13 @@ export function loadSessions({ root = defaultRoot(), days = 30, rateOverrides } 
   return out.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
 }
 
-/** MCP servers this machine is configured to attach, called or not. */
+/**
+ * MCP servers this machine is configured to attach, called or not. Discovery
+ * lives in `mcp.mjs` so the nudge and `marmot mcp-audit` always agree on which
+ * servers exist.
+ */
 export function configuredServers(root = defaultRoot(), cwd = null) {
-  const found = new Set();
-  const files = [join(root, "mcp.json"), join(root, "settings.json")];
-  if (cwd) files.push(join(cwd, ".mcp.json"));
-  for (const p of files) {
-    if (!existsSync(p)) continue;
-    try {
-      const d = JSON.parse(readFileSync(p, "utf8"));
-      for (const k of Object.keys(d.mcpServers ?? {})) found.add(k);
-    } catch {
-      /* a malformed config is a finding for the report, not a crash */
-    }
-  }
-  return [...found];
+  return Object.keys(readServerConfigs(root, cwd));
 }
 
 /** Spend per calendar day, oldest first. */

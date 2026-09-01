@@ -104,6 +104,7 @@ The `▲` appears once you're past your own caps.
 | `marmot browse` | | Build the session browser page and open it |
 | `marmot nudges` | | Only what's worth knowing |
 | `marmot sessions` | | One line per session |
+| `marmot mcp-audit` | | Measure what each MCP server's tool definitions cost |
 | `marmot doctor` | | What's readable on this machine, and what isn't |
 | `marmot init` | | Write the thresholds file |
 
@@ -130,6 +131,32 @@ One self-contained HTML file, written locally and opened in your browser — no 
 
 ![A single session](docs/browse-session.png)
 
+### What your MCP servers cost
+
+Every attached server's tool definitions are sent with **every** request, and
+nothing on disk records how big they are. So this asks the servers directly:
+
+```bash
+npx @drdroidlab/marmot mcp-audit
+```
+
+```
+  Server                   Tools    Tokens    Calls (30d)
+  github                      26     ~4.1K            142
+  kubernetes                  28     ~5.2K             18
+  sentry                      14     ~2.3K              0  ▲
+  datadog                     22     ~3.6K              0  ▲
+
+  15,200 tokens of tool definitions ride on every request.
+  ~5,900 of them (39%) belong to 2 servers you have not called in 30 days:
+  sentry, datadog
+```
+
+This is the one command that **starts your servers** rather than reading a file —
+everything else in Marmot is strictly read-only. It runs only when you ask, and
+the result is saved to `~/.claude/marmot-mcp.json`, so the `mcp-idle` nudge can
+quote real numbers from then on. `--tools` breaks it down per tool.
+
 ## Configuration
 
 Everything runs on defaults, so this is optional. When you do want to move a
@@ -155,6 +182,8 @@ reads it.
 | `cache-hit` | Input tokens served from cache | < 70% over ≥ 20 turns |
 | `tool-errors` | Failed tool calls | > 10% over ≥ 20 calls |
 | `mcp-idle` | Servers configured and never invoked | any |
+| `session-topics` | A long session resumed after a gap, in a different area | > 1 day gap, ≥ 2 areas |
+| `premium-window` | A habit of premium models on small sessions | ≥ 5 sessions |
 
 If a rule fires on nearly every session, **raise its cap rather than removing
 it**. Every rule carries three guards — a ratio gap, a minimum sample and a
@@ -223,7 +252,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 190 tests, no dependencies, ~2s
+npm test        # 218 tests, no dependencies, ~5s
 ```
 
 ## License

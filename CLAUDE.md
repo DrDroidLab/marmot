@@ -83,6 +83,8 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/pricing.mjs` | Published rates, cache multipliers, fast mode. |
 | `src/rules.mjs` | The nudge rules. Pure functions, no I/O beyond MCP config. |
 | `src/notify.mjs` | Bell + desktop notification. Never throws; `MARMOT_NO_NOTIFY` mutes it. |
+| `src/skills.mjs` | Skill sizes, read from SKILL.md on disk. |
+| `src/mcp.mjs` | Server discovery, and the audit client. The only code that starts a process. |
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
 | `src/render.mjs` | Terminal output. |
@@ -153,7 +155,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 190 tests, node:test, no dependencies
+npm test        # 218 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:
@@ -168,6 +170,7 @@ The suite encodes the drill that used to be manual, so most of it is covered:
 | `test/cli.test.mjs` | Every command runs; `--no-text` redacts; the page is self-contained. |
 | `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them. |
 | `test/notify.test.mjs` | Alert decisions, without firing a real popup or bell. |
+| `test/mcp.test.mjs` | The audit protocol, against a real stdio server it starts itself. |
 
 `test/helpers.mjs` builds fixtures in the real transcript shape — note that
 `response()` deliberately fans one API response out across several JSONL

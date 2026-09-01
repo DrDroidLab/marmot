@@ -16,7 +16,7 @@ import { loadSessions, defaultRoot } from "../src/sessions.mjs";
 import { loadConfig, DEFAULTS, configPath } from "../src/config.mjs";
 import { evaluate } from "../src/rules.mjs";
 import { renderReport, renderNudges, renderSessionList, totals } from "../src/render.mjs";
-import { usd, num, dim, bold } from "../src/format.mjs";
+import { usd, num, pct, tokens, dim, bold, warn, good } from "../src/format.mjs";
 import { writeFileSync, existsSync, readFileSync, statSync } from "node:fs";
 
 const argv = process.argv.slice(2);
@@ -47,6 +47,8 @@ if (has("help") || cmd === "help") {
     sessions          Every session in the window, one per line
     init              Write ${configPath(ROOT)} with the default thresholds
     config            Open that thresholds file (creating it if it is missing)
+    mcp-audit         Ask each configured MCP server for its tools, and measure
+                      what their definitions cost on every request
     doctor            What is readable on this machine, and what is not
 
   Flags
@@ -63,6 +65,10 @@ if (has("help") || cmd === "help") {
   config only
     --print           Also print the file to the terminal
     --no-open         Show the path, do not open it
+
+  mcp-audit only
+    --timeout <s>     Per server, default 20
+    --tools           List every tool, not just the totals
 
   browse only
     --limit <n>       Most recent N sessions, default 25
@@ -131,6 +137,74 @@ if (cmd === "config") {
       const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
       execFile(opener, [cfg._path], () => {});
     }
+  }
+  process.exit(0);
+}
+
+if (cmd === "mcp-audit") {
+  const { readServerConfigs, auditServers, auditPath } = await import("../src/mcp.mjs");
+  const configs = readServerConfigs(ROOT, process.cwd());
+  const names = Object.keys(configs);
+  if (!names.length) {
+    process.stdout.write(`No MCP servers configured in ${ROOT}/mcp.json, ${ROOT}/settings.json or ./.mcp.json\n`);
+    process.exit(0);
+  }
+
+  const timeoutMs = posInt(flag("timeout", 20), 20) * 1000;
+  process.stdout.write(
+    `\n  Asking ${names.length} server${names.length === 1 ? "" : "s"} for their tools. This starts each one, so it takes a moment.\n\n`,
+  );
+
+  const rows = await auditServers(configs, {
+    timeoutMs,
+    onResult: (r) =>
+      process.stdout.write(
+        r.error ? `  ${dim("·")} ${r.name.padEnd(24)} ${dim(r.error)}\n` : `  ${good("✔")} ${r.name.padEnd(24)} ${dim(`${r.count} tools`)}\n`,
+      ),
+  });
+
+  // What the window says about whether any of it was used.
+  const seen = loadSessions({ root: ROOT, days: DAYS, rateOverrides: cfg.rateOverrides });
+  const called = {};
+  for (const s of seen) for (const [srv, n] of Object.entries(s.mcpCalls ?? {})) called[srv] = (called[srv] ?? 0) + n;
+
+  const measured = rows.filter((r) => !r.error);
+  const idle = measured.filter((r) => !called[r.name]);
+  const wasted = idle.reduce((a, r) => a + r.tokens, 0);
+  const total = measured.reduce((a, r) => a + r.tokens, 0);
+
+  process.stdout.write(`\n  ${bold("Server".padEnd(24))}${bold("Tools".padStart(6))}${bold("Tokens".padStart(10))}${bold(`Calls (${DAYS}d)`.padStart(14))}\n`);
+  for (const r of rows) {
+    if (r.error) {
+      process.stdout.write(`  ${r.name.padEnd(24)}${dim(r.error.padStart(30))}\n`);
+      continue;
+    }
+    const calls = called[r.name] ?? 0;
+    const line = `  ${r.name.padEnd(24)}${String(r.count).padStart(6)}${`~${tokens(r.tokens)}`.padStart(10)}${String(calls).padStart(14)}`;
+    process.stdout.write(calls ? `${line}\n` : `${warn(line)}  ${warn("▲")}\n`);
+  }
+
+  if (has("tools")) {
+    for (const r of measured) {
+      process.stdout.write(`\n  ${bold(r.name)}\n`);
+      for (const t of r.tools) process.stdout.write(`    ${t.name.padEnd(38)}${dim(`~${tokens(t.tokens)}`)}\n`);
+    }
+  }
+
+  process.stdout.write(
+    `\n  ${num(total)} tokens of tool definitions ride on every request.\n` +
+      (idle.length
+        ? `  ${warn(`~${num(wasted)} of them (${pct(total ? wasted / total : 0)}) belong to ${idle.length} server${idle.length === 1 ? "" : "s"} you have not called in ${DAYS} days:`)}\n` +
+          `  ${warn(idle.map((r) => r.name).join(", "))}\n`
+        : `  Every measured server was called in the last ${DAYS} days.\n`),
+  );
+
+  const out = { measuredAt: new Date().toISOString(), servers: Object.fromEntries(rows.map((r) => [r.name, { count: r.count, tokens: r.tokens, error: r.error }])) };
+  try {
+    writeFileSync(auditPath(ROOT), JSON.stringify(out, null, 2) + "\n");
+    process.stdout.write(dim(`\n  Saved to ${auditPath(ROOT)} — the report will quote these figures from now on.\n\n`));
+  } catch {
+    process.stdout.write("\n");
   }
   process.exit(0);
 }
@@ -230,8 +304,15 @@ if (!sessions.length) {
 }
 
 const DEMO = has("demo");
+// Measured by `marmot mcp-audit`, if it has ever been run here.
+const MCP_SIZES = DEMO
+  ? { servers: { datadog: { count: 22, tokens: 3600 } } }
+  : (await import("../src/mcp.mjs")).readAudit(ROOT);
+
 const nudges = evaluate(sessions, cfg, {
   root: ROOT,
+  cwd: DEMO ? null : process.cwd(),
+  mcpSizes: MCP_SIZES,
   // Demo runs must not read this machine's MCP config, or the demo reports on you.
   configured: DEMO ? ["github", "sentry", "postgres", "datadog"] : undefined,
 });
