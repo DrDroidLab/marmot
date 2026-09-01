@@ -207,9 +207,12 @@ test("quotes and backslashes cannot break out of the AppleScript string", () => 
   const script = c.args[1];
   // Exactly two quotes for the body and two for the title, and no more.
   assert.equal((script.match(/"/g) ?? []).length, 4);
-  assert.ok(!script.includes('\\'));
-  assert.ok(!script.includes("$"));
-  assert.ok(!script.includes("`"));
+  assert.ok(!script.includes("\\"), "nothing that could escape inside the literal");
+
+  // `$` and backticks stay: the command is spawned with an argument array, so
+  // there is no shell to interpret them, and a cost nudge needs its figures.
+  const money = notifyCommand("darwin", "Marmot", "reached $82.50 `now`", quiet);
+  assert.match(money.args[1], /\$82\.50/);
 });
 
 test("a multi-line detail is flattened and capped", () => {

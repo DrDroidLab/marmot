@@ -23,7 +23,11 @@ import { writeFileSync } from "node:fs";
  */
 const clean = (s, n = 180) =>
   String(s ?? "")
-    .replace(/[\\"`$]/g, "")
+    // Only what could close the AppleScript string literal or escape inside it.
+    // `$` and backticks are shell metacharacters, and there is no shell here —
+    // the command is spawned with an argument array. Stripping them cost every
+    // cost nudge its dollar sign.
+    .replace(/["\\]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, n);
