@@ -1,0 +1,15 @@
+{
+  "name": "marmot",
+  "displayName": "Marmot",
+  "version": "0.1.0",
+  "description": "Your own token consumption, and deterministic nudges on turns, cost and model mix. Reads the session records already on this machine; nothing is uploaded.",
+  "keywords": [
+    "cost",
+    "tokens",
+    "usage",
+    "observability"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/DrDroidLab/marmot",
+  "repository": "https://github.com/DrDroidLab/marmot"
+}

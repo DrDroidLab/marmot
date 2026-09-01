@@ -1,0 +1,14 @@
+{
+  "name": "marmot",
+  "owner": {
+    "name": "DrDroidLab",
+    "url": "https://github.com/DrDroidLab"
+  },
+  "plugins": [
+    {
+      "name": "marmot",
+      "source": "./",
+      "description": "Your own Claude Code token consumption, with nudges on turns, cost and model mix. Entirely local."
+    }
+  ]
+}
