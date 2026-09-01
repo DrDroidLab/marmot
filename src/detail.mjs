@@ -86,6 +86,13 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
     skillCounts: {},
     mcpCounts: {},
     models: {},
+    modelTokens: {},
+    // Kept in step with sessions.mjs so a detail record is a superset of a
+    // session record: the browser page then runs the same rules over the same
+    // fields as the report, and the two cannot quote different numbers.
+    baselineTokens: null,
+    dirTouches: {},
+    promptTimes: [],
     filesTouched: new Set(),
     permissionModes: new Set(),
   };
@@ -128,7 +135,13 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
     s.version ??= o.version ?? null;
     s.title ??= o.aiTitle ?? null;
     if (o.permissionMode) s.permissionModes.add(o.permissionMode);
-    if (o.trackingPath) s.filesTouched.add(o.trackingPath);
+    if (o.trackingPath) {
+      s.filesTouched.add(o.trackingPath);
+      const dir = o.trackingPath.split("/").slice(0, -1).join("/") || "/";
+      const d = (s.dirTouches[dir] ??= { dir, count: 0, firstTurn: s.assistantTurns, lastTurn: s.assistantTurns });
+      d.count += 1;
+      d.lastTurn = s.assistantTurns;
+    }
 
     if (o.isCompactSummary || o.subtype === "compact_boundary") {
       s.compactions += 1;
@@ -141,6 +154,7 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
     // entries too — counting them here read a 2-prompt session as 26.
     if (isTypedPrompt(o, fileHasPromptSource)) {
       s.typedPrompts += 1;
+      if (o.timestamp) s.promptTimes.push(o.timestamp);
       s.events.push({ kind: "prompt", at: o.timestamp ?? null, ...clip(textOf(o.message?.content), caps.prompt) });
       continue;
     }
@@ -188,7 +202,22 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
       s.tokens.thinking += u.output_tokens_details?.thinking_tokens ?? 0;
       cost = turnCost(u, msg.model, rateOverrides) ?? 0;
       s.cost += cost;
-      if (msg.model) s.models[msg.model] = (s.models[msg.model] ?? 0) + cost;
+      if (msg.model) {
+        s.models[msg.model] = (s.models[msg.model] ?? 0) + cost;
+        const inTok = u.input_tokens ?? 0;
+        const outTok = u.output_tokens ?? 0;
+        const readTok = u.cache_read_input_tokens ?? 0;
+        const writeTok = u.cache_creation_input_tokens ?? (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
+        const mt = (s.modelTokens[msg.model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+        mt.input += inTok;
+        mt.output += outTok;
+        mt.cacheRead += readTok;
+        mt.cacheWrite += writeTok;
+        mt.total += inTok + outTok + readTok + writeTok;
+      }
+      if (s.baselineTokens === null && !o.isSidechain) {
+        s.baselineTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0));
+      }
     }
 
     if (!u && !tools.length && !body) continue;
@@ -217,5 +246,11 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
   const seen = s.tokens.cacheRead + s.tokens.cacheWrite + s.tokens.input;
   s.cacheHitRate = seen ? s.tokens.cacheRead / seen : null;
   s.totalToolCalls = Object.values(s.toolCounts).reduce((a, c) => a + c, 0);
+  s.toolErrorRate = s.totalToolCalls ? s.toolErrors / s.totalToolCalls : 0;
+  // Aliases, so the rules and the report totals can read a detail record
+  // without knowing which reader produced it.
+  s.mcpCalls = s.mcpCounts;
+  s.skills = Object.keys(s.skillCounts);
+  s.toolCalls = s.toolCounts;
   return s;
 }

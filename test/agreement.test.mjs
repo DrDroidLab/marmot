@@ -103,6 +103,32 @@ test("the readers agree on a legacy transcript that predates promptSource", () =
   assert.equal(det.assistantTurns, agg.assistantTurns);
 });
 
+test("the readers agree on the fields the page and the report share", () => {
+  // A detail record has to be a superset of a session record, or the browser
+  // page and the terminal report quote different numbers for the same window.
+  const { agg, det } = bothReaders(busySession());
+  assert.equal(det.baselineTokens, agg.baselineTokens, "baseline context");
+  assert.equal(det.toolErrorRate, agg.toolErrorRate, "tool error rate");
+  assert.deepEqual(det.modelTokens, agg.modelTokens, "tokens per model");
+  assert.deepEqual(det.promptTimes, agg.promptTimes, "prompt timestamps");
+  assert.deepEqual(det.dirTouches, agg.dirTouches, "directories touched");
+  assert.deepEqual(det.mcpCalls, agg.mcpCalls, "mcp calls");
+  assert.deepEqual([...det.skills].sort(), [...agg.skills].sort(), "skills");
+  assert.deepEqual(det.toolCalls, agg.toolCalls, "tool call counts");
+});
+
+test("a detail record can be judged by the rules, exactly as a session record is", async () => {
+  const { sessionRules } = await import("../src/rules.mjs");
+  const { DEFAULTS } = await import("../src/config.mjs");
+  const { agg, det } = bothReaders(busySession());
+  for (const rule of sessionRules) {
+    const a = rule.check(agg, DEFAULTS);
+    const d = rule.check(det, DEFAULTS);
+    assert.equal(Boolean(a), Boolean(d), `${rule.id} fires the same way on both`);
+    if (a) assert.equal(d.detail, a.detail, `${rule.id} says the same thing`);
+  }
+});
+
 test("the readers agree on a session with nothing but a prompt", () => {
   const { agg, det } = bothReaders([prompt("hello")]);
   assert.equal(det.cost, agg.cost);

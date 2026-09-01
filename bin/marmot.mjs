@@ -61,6 +61,7 @@ if (has("help") || cmd === "help") {
   report only
     --sessions        List every session in the window under the report
     --browse          Also build and open the session browser page
+    --no-audit        Do not measure MCP servers, even with no recent figures
 
   config only
     --print           Also print the file to the terminal
@@ -220,7 +221,17 @@ async function runBrowse() {
     const { demoSessions } = await import("../src/demo.mjs");
     const out = flag("out", join(ROOT, "marmot", "demo.html"));
     mkdirSync(join(ROOT, "marmot"), { recursive: true });
-    const html = buildHtml(demoSessions(), { days: 7, root: "(demo data — not your machine)", redacted: false });
+    const demo = demoSessions();
+    const { demoSkillSizes } = await import("../src/demo.mjs");
+    const { skillCosts } = await import("../src/skills.mjs");
+    const demoSummary = {
+      totals: totals(demo),
+      nudges: evaluate(demo, cfg, { root: ROOT, configured: ["github", "sentry", "postgres", "datadog"] }),
+      skills: skillCosts(totals(demo).skills, demoSkillSizes),
+      mcp: { datadog: { count: 22, tokens: 3600 } },
+      configured: ["github", "sentry", "postgres", "datadog"],
+    };
+    const html = buildHtml(demo, { days: 7, root: "(demo data — not your machine)", redacted: false, summary: demoSummary });
     writeFileSync(out, html);
     process.stdout.write(`Wrote ${out}  (6 synthetic sessions)\n`);
     if (!has("no-open")) {
@@ -262,10 +273,31 @@ async function runBrowse() {
     if (d) detailed.push(d);
   }
 
+  // The page shows the same figures as the report, computed the same way over
+  // the same records — a detail record is a superset of a session record, so
+  // `totals` and the rules read it without knowing which reader produced it.
+  const { configuredServers } = await import("../src/sessions.mjs");
+  const sizes = await mcpSizes();
+  const summary = {
+    totals: totals(detailed),
+    nudges: evaluate(detailed, cfg, {
+      root: ROOT,
+      cwd: process.cwd(),
+      mcpSizes: sizes,
+      configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : undefined,
+    }),
+    skills: (await import("../src/skills.mjs")).skillCosts(
+      totals(detailed).skills,
+      has("demo") ? (await import("../src/demo.mjs")).demoSkillSizes : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() }),
+    ),
+    mcp: sizes?.servers ?? {},
+    configured: has("demo") ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, process.cwd()),
+  };
+
   const outDir = join(ROOT, "marmot");
   mkdirSync(outDir, { recursive: true });
   const out = flag("out", join(outDir, `sessions-${new Date().toISOString().slice(0, 10)}.html`));
-  const html = buildHtml(detailed, { days: DAYS, root: ROOT, redacted });
+  const html = buildHtml(detailed, { days: DAYS, root: ROOT, redacted, summary });
   writeFileSync(out, html);
 
   const mb = (Buffer.byteLength(html) / 1024 / 1024).toFixed(1);
@@ -297,10 +329,45 @@ if (!sessions.length) {
 }
 
 const DEMO = has("demo");
-// Measured by `marmot mcp-audit`, if it has ever been run here.
-const MCP_SIZES = DEMO
-  ? { servers: { datadog: { count: 22, tokens: 3600 } } }
-  : (await import("../src/mcp.mjs")).readAudit(ROOT);
+/**
+ * What each MCP server's definitions cost. Read from the saved audit, and
+ * measured now when there is nothing recent — a nudge that cannot say what a
+ * server costs is only half a nudge. Measuring starts each server, so it is
+ * cached for a week and announces itself while it runs.
+ */
+async function mcpSizes() {
+  if (has("demo")) return { servers: { datadog: { count: 22, tokens: 3600 } } };
+  const { readAudit, readServerConfigs, auditServers, auditPath } = await import("../src/mcp.mjs");
+
+  const saved = readAudit(ROOT);
+  const ageDays = saved?.measuredAt ? (Date.now() - Date.parse(saved.measuredAt)) / 86_400_000 : Infinity;
+  if (saved && ageDays < cfg.mcp.auditMaxAgeDays) return saved;
+  if (!cfg.mcp.enabled || !cfg.mcp.autoAudit || has("no-audit")) return saved;
+
+  const configs = readServerConfigs(ROOT, process.cwd());
+  const names = Object.keys(configs);
+  if (!names.length) return saved;
+
+  process.stdout.write(
+    dim(`\n  Measuring ${names.length} MCP server${names.length === 1 ? "" : "s"} — this starts each one, and is cached for ${cfg.mcp.auditMaxAgeDays} days.\n`),
+  );
+  const rows = await auditServers(configs, {
+    timeoutMs: cfg.mcp.auditTimeoutSecs * 1000,
+    onResult: (r) =>
+      process.stdout.write(r.error ? dim(`    · ${r.name.padEnd(22)} ${r.error}\n`) : dim(`    ✔ ${r.name.padEnd(22)} ${r.count} tools, ~${tokens(r.tokens)}\n`)),
+  });
+  process.stdout.write("\n");
+
+  const out = { measuredAt: new Date().toISOString(), servers: Object.fromEntries(rows.map((r) => [r.name, { count: r.count, tokens: r.tokens, error: r.error }])) };
+  try {
+    writeFileSync(auditPath(ROOT), JSON.stringify(out, null, 2) + "\n");
+  } catch {
+    /* an unwritable cache costs a re-measure, not the report */
+  }
+  return out;
+}
+
+const MCP_SIZES = await mcpSizes();
 
 const nudges = evaluate(sessions, cfg, {
   root: ROOT,
@@ -372,7 +439,8 @@ if (cmd === "sessions") {
 const SKILL_SIZES = DEMO
   ? (await import("../src/demo.mjs")).demoSkillSizes
   : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
-process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES }));
+const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : (await import("../src/sessions.mjs")).configuredServers(ROOT, process.cwd());
+process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED }));
 
 // `--sessions` and `--browse` are what make one command enough: the numbers,
 // every session behind them, and the full page when you want to dig in.

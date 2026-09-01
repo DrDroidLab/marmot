@@ -78,7 +78,17 @@ export const DEFAULTS = {
 
   cache: { minHitRate: 0.7, minTurns: 20 },
   toolErrors: { maxRate: 0.1, minCalls: 20 },
-  mcp: { enabled: true },
+  mcp: {
+    enabled: true,
+    // The report measures your MCP servers itself when it has no recent
+    // figures, because a nudge that cannot say what a server costs is only
+    // half a nudge. Measuring starts each server, so the result is cached and
+    // re-used for a week. Set autoAudit false to only ever measure on demand.
+    autoAudit: true,
+    auditMaxAgeDays: 7,
+    // Shorter than the explicit `mcp-audit`: this one is in your way.
+    auditTimeoutSecs: 10,
+  },
 
   // USD per million tokens, merged over the published table. Set this if you
   // are on negotiated rates and want the shadow price to match your contract.

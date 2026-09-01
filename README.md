@@ -122,10 +122,13 @@ session listed, and `--browse` opens the full page from there.
 | `--session ID` | `browse`: just this one |
 | `--limit N` | `browse`: most recent N, default 25 |
 | `--no-text` | `browse`: counts and tool names only, no prompts |
+| `--no-audit` | Skip measuring MCP servers this run |
 
 ### The session browser
 
-One self-contained HTML file, written locally and opened in your browser — no CDN, no network, no web fonts. It carries the full timeline of every prompt, reply and tool call, with a cost-per-turn chart, the token split, tool/skill/MCP breakdowns, a text filter and an errors-only toggle.
+One self-contained HTML file, written locally and opened in your browser — no CDN, no network, no web fonts.
+
+It opens on **the same figures as the report** — spend, tokens, cache, baseline context, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. From there each session opens onto its full timeline: every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle.
 
 ![The session browser](docs/browse-index.png)
 
@@ -152,10 +155,11 @@ npx @drdroidlab/marmot mcp-audit
   sentry, datadog
 ```
 
-This is the one command that **starts your servers** rather than reading a file —
-everything else in Marmot is strictly read-only. It runs only when you ask, and
-the result is saved to `~/.claude/marmot-mcp.json`, so the `mcp-idle` nudge can
-quote real numbers from then on. `--tools` breaks it down per tool.
+The report runs this for you when it has no recent figures, showing progress as
+it goes, and caches the result in `~/.claude/marmot-mcp.json` for a week. It is
+the only thing Marmot does that **starts your servers** rather than reading a
+file — set `mcp.autoAudit` to `false` to only ever measure on demand, or pass
+`--no-audit` for one run. `--tools` breaks it down per tool.
 
 ## Configuration
 
@@ -210,6 +214,10 @@ them work.
   // "off" stops the daily digest entirely.
   "digest": { "cadence": "daily" },
 
+  // The report measures your MCP servers when it has nothing recent.
+  // autoAudit false means it only ever measures when you ask it to.
+  "mcp": { "enabled": true, "autoAudit": true, "auditMaxAgeDays": 7 },
+
   "session": { "costCap": 25, "turnCap": 20, "costFloor": 1 },
   "daily":   { "costCap": 50, "baselineSigma": 2.5, "baselineDays": 14 },
 
@@ -225,6 +233,9 @@ above — these are just the ones worth knowing about.
 **Turning the alerts down.** `notify.bell` rings the terminal bell,
 `notify.desktop` raises a system notification. Set either to `false`.
 `MARMOT_NO_NOTIFY=1` silences both for one run, and CI is silent automatically.
+
+**Measuring MCP servers less often.** Raise `mcp.auditMaxAgeDays`, or set
+`mcp.autoAudit` to `false` and run `marmot mcp-audit` when it suits you.
 
 **Starting the nudges over.** `~/.claude/marmot-state.json` records what has
 already been said. Delete it to hear everything again.
@@ -258,7 +269,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 229 tests, no dependencies, ~5s
+npm test        # 233 tests, no dependencies, ~6s
 ```
 
 ## License

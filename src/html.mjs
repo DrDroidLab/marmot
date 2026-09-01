@@ -10,8 +10,8 @@
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-export function buildHtml(sessions, { days, root, generatedAt = new Date().toISOString(), redacted = false }) {
-  const payload = JSON.stringify({ sessions, days, root, generatedAt, redacted }).replace(/</g, "\\u003c");
+export function buildHtml(sessions, { days, root, generatedAt = new Date().toISOString(), redacted = false, summary = null }) {
+  const payload = JSON.stringify({ sessions, days, root, generatedAt, redacted, summary }).replace(/</g, "\\u003c");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -24,7 +24,7 @@ export function buildHtml(sessions, { days, root, generatedAt = new Date().toISO
   --bg:#f7f7f5; --surface:#fcfcfb; --surface-2:#f1f0ed; --line:#e2e1dc;
   --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#87857f;
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
-  --danger:#e34948; --accent:#2a78d6; --track:#e8e7e3;
+  --danger:#e34948; --accent:#2a78d6; --track:#e8e7e3; --warn:#a06c00;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
@@ -34,7 +34,7 @@ export function buildHtml(sessions, { days, root, generatedAt = new Date().toISO
     --bg:#131312; --surface:#1a1a19; --surface-2:#232322; --line:#333330;
     --ink:#fff; --ink-2:#c3c2b7; --ink-3:#8d8b83;
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
-    --danger:#e66767; --accent:#3987e5; --track:#2b2b29;
+    --danger:#e66767; --accent:#3987e5; --track:#2b2b29; --warn:#c98500; --warn:#c98500;
   }
 }
 :root[data-theme="dark"]{
@@ -42,7 +42,7 @@ export function buildHtml(sessions, { days, root, generatedAt = new Date().toISO
   --bg:#131312; --surface:#1a1a19; --surface-2:#232322; --line:#333330;
   --ink:#fff; --ink-2:#c3c2b7; --ink-3:#8d8b83;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
-  --danger:#e66767; --accent:#3987e5; --track:#2b2b29;
+  --danger:#e66767; --accent:#3987e5; --track:#2b2b29; --warn:#c98500;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
@@ -76,6 +76,15 @@ tbody tr:hover{background:var(--surface-2)}
 .kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.045em;color:var(--ink-3);margin-bottom:5px}
 .kpi .v{font-size:21px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .kpi .n{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+
+/* --- nudges --- */
+.nudge{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:9px;padding:11px 14px;margin-bottom:8px}
+.nudge h3{margin:0 0 4px;font-size:13px;font-weight:600}
+.nudge p{margin:0 0 4px;font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.nudge .act{color:var(--ink-3);font-size:12px}
+.nudge .who{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-top:5px}
+.idle{color:var(--warn);font-weight:600}
+.barrow .lbl u.idlebar{background:var(--warn);opacity:.22}
 
 /* --- charts --- */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:15px 16px;margin:14px 0}
@@ -228,6 +237,79 @@ function filelist(files){
 
 /* ---------------- index ---------------- */
 var sortKey="cost", sortDir=-1;
+/** Models, skills, MCP servers and the nudges: the report, on the page. */
+function summaryPanels(){
+  var Z=D.summary; if(!Z||!Z.totals) return "";
+  var M=Z.totals, out="";
+
+  var models=Object.keys(M.models||{}).map(function(m){return [m,M.models[m]];}).sort(function(a,b){return b[1]-a[1];});
+  if(models.length){
+    out+='<div class="panel"><h2>Where it went</h2><p class="cap">Modelled at published rates. On a subscription plan this is a shadow price, not an invoice line.</p><div class="barlist">'
+      +models.map(function(r){
+        var w=M.cost?(r[1]/M.cost*100):0;
+        var tk=(M.modelTokens||{})[r[0]];
+        return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"></u><s>'+esc(r[0])+'</s></div>'
+          +'<div class="ct">'+usd(r[1])+' · '+Math.round(w)+'%'+(tk?" · "+tok(tk):"")+'</div></div>';
+      }).join("")+'</div></div>';
+  }
+
+  if((Z.skills||[]).length){
+    var maxSkill=Z.skills[0].onLoad||1;
+    out+='<div class="panel"><h2>Skills</h2><p class="cap">What each costs to load, measured from the SKILL.md on disk. Skills that ship inside Claude Code are not on disk, and are not guessed at.</p><div class="barlist">'
+      +Z.skills.map(function(r){
+        var w=r.onLoad?(r.onLoad/maxSkill*100):0;
+        return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"></u><s>'+esc(r.name)+'</s></div>'
+          +'<div class="ct">'+num(r.calls)+'× · '+(r.known?"~"+tok(r.onLoad)+" to load":"size not readable")+'</div></div>';
+      }).join("")+'</div></div>';
+  }
+
+  var names={}, k;
+  for(k in (M.mcp||{})) names[k]=1;
+  for(k in (Z.mcp||{})) names[k]=1;
+  (Z.configured||[]).forEach(function(n){ names[n]=1; });
+  var servers=Object.keys(names);
+  if(servers.length){
+    var rows=servers.map(function(n){ return {name:n, calls:(M.mcp||{})[n]||0, size:(Z.mcp||{})[n]||null}; })
+      .sort(function(a,b){ return b.calls-a.calls || ((b.size&&b.size.tokens)||0)-((a.size&&a.size.tokens)||0); });
+    var total=0, idle=0;
+    rows.forEach(function(r){ if(r.size&&r.size.tokens){ total+=r.size.tokens; if(!r.calls) idle+=r.size.tokens; } });
+    out+='<div class="panel"><h2>MCP servers</h2><p class="cap">Tool definitions from every attached server are sent with every request'
+      +(total?", "+num(total)+" tokens in total"+(idle?', <span class="idle">'+num(idle)+" of them for servers never called</span>":""):"")
+      +'.</p><div class="barlist">'
+      +rows.map(function(r){
+        var t=(r.size&&r.size.tokens)||0;
+        // The bar is the cost it adds to every request, not how often it was
+        // called — an idle server is the expensive case, and must look it.
+        var w=total&&t?(t/total*100):0;
+        var note=r.size?(r.size.error?esc(r.size.error):r.size.count+" tools · ~"+tok(t)):"not measured";
+        return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"'+(r.calls?"":' class="idlebar"')+'></u><s'+(r.calls?"":' class="idle"')+'>'+esc(r.name)+'</s></div>'
+          +'<div class="ct">'+num(r.calls)+'× · '+note+(r.calls?"":' · <span class="idle">never called</span>')+'</div></div>';
+      }).join("")+'</div></div>';
+  }
+
+  var N=Z.nudges||{};
+  var all=(N.windowNudges||[]).map(function(w){ return {label:w.label,detail:w.detail,action:w.action,hits:null}; })
+    .concat((N.sessionNudges||[]).map(function(g){ return {label:g.label,detail:null,action:null,hits:g.hits}; }));
+  if(all.length){
+    out+='<div class="panel"><h2>'+num(all.length)+" thing"+(all.length===1?"":"s")+' worth knowing</h2>'
+      +'<p class="cap">Deterministic rules over this window — no model decided any of these. The thresholds are yours, in ~/.claude/marmot.json.</p>'
+      +all.map(function(n){
+        var body="";
+        if(n.detail) body='<p>'+esc(n.detail)+'</p><div class="act">'+esc(n.action||"")+'</div>';
+        else if(n.hits&&n.hits.length){
+          body=n.hits.slice(0,3).map(function(h){
+            var s=h.session||{};
+            return '<p>'+esc(h.detail)+'</p><div class="who">'+esc(String(s.id||"").slice(0,8))+" · "+esc(s.day||"")+" · "+esc((s.cwd||"").split("/").slice(-2).join("/"))+'</div>';
+          }).join("")
+          +(n.hits.length>3?'<div class="who">…and '+(n.hits.length-3)+' more</div>':"")
+          +'<div class="act" style="margin-top:6px">'+esc(n.hits[0].action||"")+'</div>';
+        }
+        return '<div class="nudge"><h3>'+esc(n.label)+(n.hits&&n.hits.length>1?" · "+n.hits.length+" sessions":"")+'</h3>'+body+'</div>';
+      }).join("")+'</div>';
+  }
+  return out;
+}
+
 function renderIndex(){
   location.hash="";
   var cols=[["day","Date",0],["title","Session",0],["cost","Cost",1],["typedPrompts","Prompts",1],
@@ -238,13 +320,21 @@ function renderIndex(){
     return ((x||0)-(y||0))*sortDir;
   });
   var tot=S.reduce(function(a,s){return{cost:a.cost+s.cost,p:a.p+s.typedPrompts,t:a.t+s.assistantTurns,tc:a.tc+s.totalToolCalls};},{cost:0,p:0,t:0,tc:0});
+  // Every figure here is computed in Node by the same code as the terminal
+  // report and shipped in the payload, so the two cannot disagree.
+  var M=(D.summary&&D.summary.totals)||null;
+  var pp=M&&M.promptsPerSession;
   view.innerHTML = '<div class="kpis">'
       +kpi("Spend",usd(tot.cost),"published rates")
       +kpi("Sessions",num(S.length))
-      +kpi("Prompts",num(tot.p),"you typed")
-      +kpi("Model turns",num(tot.t))
-      +kpi("Tool calls",num(tot.tc))
+      +kpi("Prompts",num(tot.p),pp?(pp.mean.toFixed(1)+" mean · "+num(pp.median)+" median · "+num(pp.p99)+" p99"):"you typed")
+      +kpi("Model turns",num(tot.t),tot.p?((tot.t/tot.p).toFixed(1)+" per prompt"):"")
+      +kpi("Tokens",M?tok(M.tok):"—","input, output and cache")
+      +kpi("Cache hit rate",M&&M.cacheHitRate!=null?pct(M.cacheHitRate):"—","higher is cheaper")
+      +kpi("Tool calls",num(tot.tc),M&&M.toolCalls?pct(M.toolErrors/M.toolCalls)+" failed":"")
+      +(M&&M.baseline!=null?kpi("Baseline context",tok(M.baseline),"before you type"):"")
     +'</div>'
+    +summaryPanels()
     +'<div class="tablewrap"><table><thead><tr>'
     +cols.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(c[2]?"num":"")+'">'+c[1]+(sortKey===c[0]?(sortDir<0?" ↓":" ↑"):"")+'</th>'; }).join("")
     +'</tr></thead><tbody>'

@@ -67,7 +67,7 @@ export function renderSessionList(sessions, { heading = false } = {}) {
   return out.join("\n");
 }
 
-export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {} }) {
+export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [] }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"
     : "everything below was read from ~/.claude/projects on this machine";
@@ -129,10 +129,33 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
     }
   }
 
-  if (mcpRows.length) {
+  // Everything attached, not only what was called — an idle server costs the
+  // same on every request as a busy one, and only this view shows that.
+  const measured = mcpSizes?.servers ?? {};
+  const allServers = [...new Set([...mcpRows.map(([m]) => m), ...configuredServers, ...Object.keys(measured)])];
+  if (allServers.length) {
+    const calls = Object.fromEntries(mcpRows);
+    const rows = allServers
+      .map((name) => ({ name, calls: calls[name] ?? 0, size: measured[name] ?? null }))
+      .sort((a, b) => b.calls - a.calls || (b.size?.tokens ?? 0) - (a.size?.tokens ?? 0));
+    const w = Math.max(wide, ...rows.map((r) => r.name.length));
+
     out.push("");
-    out.push(bold("  MCP servers called"));
-    for (const [srv, n] of mcpRows) out.push(`  ${srv.padEnd(wide)}  ${String(`${n}×`).padEnd(10)}`);
+    out.push(bold("  MCP servers"));
+    for (const r of rows) {
+      const size = r.size?.error ? dim(r.size.error) : r.size?.tokens ? dim(`${r.size.count} tools · ~${tokens(r.size.tokens)} tokens`) : "";
+      const label = `  ${r.name.padEnd(w)}  ${String(`${r.calls}×`).padStart(6)}  `;
+      out.push(r.calls ? `${label}${size}` : `${warn(label)}${size}${warn("  ▲ never called")}`);
+    }
+
+    const priced = rows.filter((r) => r.size?.tokens);
+    if (priced.length) {
+      const total = priced.reduce((a, r) => a + r.size.tokens, 0);
+      const idle = priced.filter((r) => !r.calls).reduce((a, r) => a + r.size.tokens, 0);
+      out.push(
+        dim(`  ${"".padEnd(w)}  ${num(total)} tokens on every request`) + (idle ? warn(`, ${num(idle)} of them idle`) : ""),
+      );
+    }
   }
 
   out.push("");

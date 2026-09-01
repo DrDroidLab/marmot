@@ -283,6 +283,50 @@ test("the page's inline script parses, and its data payload is valid JSON", asyn
   assert.ok(sawJson && sawCode, "expected both a JSON payload and executable script");
 });
 
+test("the page and the report quote the same figures", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+
+  const report = run(["report", "--days", "7", "--no-audit", "--root", root]).out;
+  const out = join(root, "page.html");
+  run(["browse", "--days", "7", "--no-open", "--no-audit", "--out", out, "--root", root]);
+  const html = readFileSync(out, "utf8");
+  const payload = JSON.parse(/<script[^>]*id="data"[^>]*>([\s\S]*?)<\/script>/.exec(html)[1].replace(/\\u003c/g, "<"));
+
+  assert.ok(payload.summary, "the page carries a precomputed summary");
+  const t2 = payload.summary.totals;
+
+  // The report prints these; the page must agree on all of them, because they
+  // are computed once in Node and shipped, not recomputed in the browser.
+  assert.match(report, new RegExp(`Prompts you typed\\s+${t2.prompts}`));
+  assert.match(report, new RegExp(`Model turns\\s+${t2.turns.toLocaleString("en-US")}`));
+  assert.equal(t2.sessions, 1);
+  assert.ok(t2.baseline > 0, "and the page knows the baseline context");
+  assert.ok(t2.promptsPerSession, "and the prompt distribution");
+});
+
+test("the page carries the same nudges the report prints", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  // A session well past the cost cap, so at least one rule has to fire.
+  const entries = [prompt("go")];
+  for (let i = 0; i < 40; i += 1) {
+    entries.push(prompt(`step ${i}`));
+    entries.push(response({ id: `m${i}`, u: usage({ input: 5_000, output: 20_000, cacheRead: 200_000, write1h: 50_000 }), text: "working" }));
+  }
+  writeSession(root, { id: "spendy", entries });
+
+  const out = join(root, "page.html");
+  run(["browse", "--days", "7", "--no-open", "--no-audit", "--out", out, "--root", root]);
+  const html = readFileSync(out, "utf8");
+  const payload = JSON.parse(/<script[^>]*id="data"[^>]*>([\s\S]*?)<\/script>/.exec(html)[1].replace(/\\u003c/g, "<"));
+
+  const ids = payload.summary.nudges.sessionNudges.map((g) => g.id);
+  assert.ok(ids.includes("session-cost"), `expected session-cost, got ${ids.join(", ")}`);
+  const report = run(["report", "--days", "7", "--no-audit", "--root", root]).out;
+  assert.match(report, /Session past the cost cap/);
+});
+
 test("the page embeds a payload the browser can parse", (t) => {
   const { root, cleanup } = populatedRoot();
   t.after(cleanup);

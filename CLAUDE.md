@@ -104,6 +104,12 @@ restated in both they drifted, and the page counted a legacy transcript's tool
 results as prompts. The usage accounting is still duplicated: if you change how
 cost is computed, change both. `test/agreement.test.mjs` fails when they diverge.
 
+A detail record is deliberately a **superset** of a session record — it also
+carries `baselineTokens`, `dirTouches`, `promptTimes`, `modelTokens`,
+`toolErrorRate` and `mcpCalls`/`skills` aliases. That is what lets the browser
+page run the same `totals()` and the same rules as the terminal report, so the
+two surfaces cannot quote different numbers. Keep it that way when adding a field.
+
 ## Adding a rule
 
 Rules live in `sessionRules` (judge one session) or `windowRules` (need the whole
@@ -165,7 +171,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 229 tests, node:test, no dependencies
+npm test        # 233 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:
