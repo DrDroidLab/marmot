@@ -133,6 +133,19 @@ Rules in `cfg.live` may interrupt mid-session; everything else waits for the dai
 digest. Cost rules re-fire at each doubling (`state.mjs`), all others once per
 session.
 
+## Contributing
+
+**Never push to `main`.** Cut a branch, open a PR, let it be reviewed and merged
+there — including for a one-line fix, and including when you are the only person
+working on it. `main` moves through pull requests only.
+
+```bash
+git checkout -b some-change
+# ...work, with `npm test` passing...
+git push -u origin some-change
+gh pr create --fill
+```
+
 ## Installing
 
 The CLI is the install. The plugin still exists in `commands/` and
