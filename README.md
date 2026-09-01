@@ -450,6 +450,9 @@ them work.
                "paceRatio": 1.5, "paceMinElapsed": 15, "paceMinUsed": 20,
                "driverMinPercent": 60 },
 
+  // How many generated pages to keep in ~/.claude/marmot.
+  "browse": { "keep": 5 },
+
   // The report measures your MCP servers when it has nothing recent.
   // autoAudit false means it only ever measures when you ask it to.
   "mcp": { "enabled": true, "autoAudit": true, "auditMaxAgeDays": 7 },
