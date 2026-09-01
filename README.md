@@ -210,7 +210,7 @@ them work.
 
   // How a nudge reaches you, beyond the line in the transcript.
   // "app" overrides which macOS app posts the notification — see below.
-  "notify": { "desktop": true, "bell": true, "app": null },
+  "notify": { "desktop": true, "bell": true, "app": null, "sound": "Ping" },
 
   // "off" stops the daily digest entirely.
   "digest": { "cadence": "daily" },
@@ -239,42 +239,55 @@ above — these are just the ones worth knowing about.
 
 1. **Your terminal posts it itself**, via an OSC escape sequence — iTerm2,
    Ghostty, WezTerm, kitty, Konsole, Windows Terminal and Hyper all support
-   this. Nothing to install, nothing to allow, and it works the same on macOS,
-   Linux and Windows. This is the one that just works.
+   this. Nothing to install, nothing to allow, identical on every platform.
+   This is the one that just works.
 2. **The operating system**, where the terminal has no such channel:
-   `osascript` on macOS, `notify-send` on Linux.
+   `osascript` on macOS, `notify-send` on Linux, a PowerShell notification on
+   Windows. All three ship with the OS.
 
-Terminals that are not known to support the sequence never get sent one — an
-unrecognised escape code can print as garbage, and that is worse than a missing
-notification.
+The notification shows the marmot on Linux and Windows. macOS shows the posting
+application's icon and gives `display notification` no say in it, so there it
+carries your terminal's.
 
-**If no notification ever appears (macOS, channel 2).** macOS accepts a
-notification from an unauthorised app and drops it with no error, so this fails
-silently. The notification is posted by whichever app is running Marmot — your
-terminal — and that app has to be allowed to post.
+Terminals not known to support the sequence are never sent one — an
+unrecognised escape code can print as visible garbage, which is worse than a
+missing notification. `marmot doctor` names the channel in force.
 
-```bash
-marmot doctor        # names the app, and says whether it may post
-```
+### If no notification arrives
 
-1. **System Settings → Notifications**, find your terminal, turn *Allow
-   notifications* on.
-2. If it is **not in that list at all**, it cannot be granted — macOS only
-   lists apps that have registered themselves, and some terminals never do.
-   Point Marmot at one that is listed instead:
+**Check the quiet-hours setting first.** This is the usual answer, and it
+suppresses notifications from every app at once, so nothing you change in
+Marmot will help until it is off.
 
-   ```jsonc
-   "notify": { "desktop": true, "bell": true, "app": "com.googlecode.iterm2" }
-   ```
+| | Where to look |
+|---|---|
+| **macOS** | Click the clock → is a **Focus** mode on? Or Control Centre → Focus. Do Not Disturb hides everything, including notifications from apps that are fully allowed. |
+| **Windows 11** | Settings → System → **Notifications** → *Do not disturb* off. Check *Notifications* itself is on, and that focus sessions are not scheduled. |
+| **Windows 10** | Settings → System → **Focus assist** → set to *Off*. |
+| **GNOME** | Settings → **Notifications** → *Do Not Disturb* off. |
+| **KDE Plasma** | System Settings → **Notifications** → *Do Not Disturb* off. |
 
-   A bundle id or an app name both work. `marmot doctor` will confirm it.
-3. Or set `notify.desktop` to `false` and rely on the bell and the nudge in
-   your transcript, which are unaffected either way.
+**Then check the app is allowed** (macOS and Windows only):
 
-**About the bell.** A hook's output is a pipe Claude Code reads, not a
-terminal, so the bell is written to `/dev/tty` where there is one and falls
-back to stderr where there is not. In some setups it will not be audible; the
-line in your transcript always is.
+- **macOS** — System Settings → **Notifications** → find the app named by
+  `marmot doctor` and allow it. If it is not in that list it cannot be granted:
+  macOS only lists apps that have registered themselves. Point Marmot at one
+  that is, with `"notify": { "app": "com.googlecode.iterm2" }` — a bundle id or
+  an app name both work.
+- **Windows** — Settings → System → Notifications, and make sure notifications
+  from PowerShell are permitted.
+- **Linux** — `notify-send` comes from libnotify. On Debian and Ubuntu that is
+  `sudo apt install libnotify-bin`; it is usually present already. A headless
+  box has no notification daemon, and the attempt fails silently.
+
+Or set `notify.desktop` to `false` and rely on the bell and the nudge in your
+transcript, which are unaffected either way.
+
+**About the bell.** `notify.bell` does two things. It writes a terminal BEL to
+`/dev/tty` — a hook's own output is a pipe Claude Code reads, not a terminal,
+so stderr would swallow it — and it asks the desktop notification to play a
+sound, which is audible wherever the notification is visible and needs no
+terminal at all. `notify.sound` names the macOS sound; *Ping* by default.
 
 **Measuring MCP servers less often.** Raise `mcp.auditMaxAgeDays`, or set
 `mcp.autoAudit` to `false` and run `marmot mcp-audit` when it suits you.
@@ -311,7 +324,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 250 tests, no dependencies, ~6s
+npm test        # 257 tests, no dependencies, ~6s
 ```
 
 ## License

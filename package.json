@@ -18,6 +18,8 @@
     "scripts",
     "commands",
     "hooks",
+    "docs/marmot.svg",
+    "docs/marmot.ico",
     ".claude-plugin",
     "README.md",
     "LICENSE"

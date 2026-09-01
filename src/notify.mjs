@@ -15,7 +15,8 @@
  */
 
 import { spawn, execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * Strip what could break out of the AppleScript string literal we build below,
@@ -84,7 +85,7 @@ export function oscSequence(notifier, title, body) {
  * The command that raises a desktop notification on this platform, or null
  * where there isn't one we can rely on being installed.
  */
-export function notifyCommand(platform, title, body, env = process.env, app = null) {
+export function notifyCommand(platform, title, body, env = process.env, app = null, sound = null) {
   const t = clean(title, 60);
   const b = clean(body);
   if (!b) return null;
@@ -100,57 +101,105 @@ export function notifyCommand(platform, title, body, env = process.env, app = nu
     const as = app ? clean(app, 80) : null;
     const host = as ?? (env?.__CFBundleIdentifier ? clean(env.__CFBundleIdentifier, 80) : null);
     const target = host ? (host.includes(".") ? `application id "${host}"` : `application "${host}"`) : null;
-    const script = target
-      ? `tell ${target} to display notification "${b}" with title "${t}"`
-      : `display notification "${b}" with title "${t}"`;
-    return { cmd: "osascript", args: ["-e", script] };
+    // The notification's own sound is a far better bell than a terminal BEL:
+    // it is audible wherever the notification is visible, and needs no
+    // controlling terminal.
+    const withSound = sound ? ` sound name "${clean(sound, 30)}"` : "";
+    const notify = `display notification "${b}" with title "${t}"${withSound}`;
+    return { cmd: "osascript", args: ["-e", target ? `tell ${target} to ${notify}` : notify] };
   }
   if (platform === "linux") {
     // Part of libnotify, present on most desktops. Absent on a headless box,
     // where the spawn below fails and is swallowed.
-    return { cmd: "notify-send", args: ["--app-name=Marmot", t, b] };
+    const icon = iconPath("svg");
+    return {
+      cmd: "notify-send",
+      args: ["--app-name=Marmot", ...(icon ? ["-i", icon] : []), ...(sound ? ["--hint=string:sound-name:message-new-instant"] : []), t, b],
+    };
   }
-  // Windows has no dependable built-in without extra modules, so it gets the
-  // bell only. Better than a popup that works on one machine in three.
+  if (platform === "win32") {
+    // No extra module, and nothing to install: NotifyIcon ships with the .NET
+    // Framework that is present on every Windows since 7, and Windows 10 and 11
+    // surface its balloon as a normal toast. BurntToast would be prettier and
+    // is not installed anywhere by default.
+    //
+    // The icon has to stay visible while the balloon shows, so the script
+    // sleeps before disposing — which is fine, because it is spawned detached.
+    const icoPath = iconPath("ico");
+    const ps = [
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      "Add-Type -AssemblyName System.Drawing;",
+      "$n=New-Object System.Windows.Forms.NotifyIcon;",
+      icoPath ? `$n.Icon=New-Object System.Drawing.Icon(${psQuote(icoPath)});` : "$n.Icon=[System.Drawing.SystemIcons]::Information;",
+      `$n.BalloonTipTitle=${psQuote(t)};`,
+      `$n.BalloonTipText=${psQuote(b)};`,
+      "$n.Visible=$true;",
+      "$n.ShowBalloonTip(8000);",
+      sound ? "[System.Media.SystemSounds]::Asterisk.Play();" : "",
+      "Start-Sleep -Seconds 9;",
+      "$n.Dispose()",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return { cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps] };
+  }
   return null;
+}
+
+/**
+ * A PowerShell single-quoted literal, where the only escape is a doubled
+ * quote. Everything else — $, backticks, backslashes — is inert inside one.
+ */
+const psQuote = (v) => `'${String(v ?? "").replace(/'/g, "''")}'`;
+
+/**
+ * The marmot, for platforms whose notifications can show one.
+ *
+ * Linux takes any image path; Windows needs an .ico, which is why one is
+ * committed beside the SVG. macOS shows the posting application's icon and
+ * gives `display notification` no say in it — a custom icon there would mean
+ * shipping an app bundle, which is not worth it for a nudge.
+ */
+export function iconPath(kind) {
+  try {
+    const p = fileURLToPath(new URL(`../docs/marmot.${kind}`, import.meta.url));
+    return existsSync(p) ? p : null;
+  } catch {
+    return null;
+  }
 }
 
 /** True when the environment says to stay silent regardless of config. */
 export const silenced = (env = process.env) => Boolean(env.MARMOT_NO_NOTIFY || env.CI);
 
 /**
- * Whether a notification would actually arrive here.
+ * Which channel a notification would go out on, for `marmot doctor`.
  *
- * macOS keeps per-app notification settings in `com.apple.ncprefs`. An app that
- * has never been granted permission is simply absent, and anything it posts is
- * dropped without an error — so `marmot doctor` can say so rather than leaving
- * you to wonder why the bell rings and nothing appears.
+ * It deliberately does not try to predict whether macOS will show it. An
+ * earlier version read `com.apple.ncprefs` and called an app "blocked" when it
+ * was absent — then a plain notification arrived from exactly such an app, so
+ * the check was reporting a working setup as broken. Absence from that file
+ * means the app has not registered, not that delivery fails. A false alarm that
+ * talks someone out of a working feature is worse than no check at all.
  */
-export function deliverability({ platform = process.platform, env = process.env, run, app = null } = {}) {
-  if (silenced(env)) return { deliverer: null, status: "silenced", detail: "MARMOT_NO_NOTIFY or CI is set" };
-  if (platform !== "darwin") {
-    const t = app ? null : oscNotifier(env);
-    if (t) return { deliverer: t.name, status: "ok", detail: `${t.name} posts them itself, with nothing to allow` };
-    return { deliverer: platform === "win32" ? null : "notify-send", status: "unknown", detail: "not checkable on this platform" };
-  }
+export function deliverability({ platform = process.platform, env = process.env, app = null } = {}) {
+  if (silenced(env)) return { deliverer: null, channel: "none", status: "silenced", detail: "MARMOT_NO_NOTIFY or CI is set" };
+
   const term = app ? null : oscNotifier(env);
-  if (term) return { deliverer: term.name, status: "ok", detail: `${term.name} posts them itself, with nothing to allow` };
-  const host = app ?? env.__CFBundleIdentifier ?? null;
-  const deliverer = host ?? "com.apple.ScriptEditor2";
-  try {
-    const exec = run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"] }));
-    const xml = exec("plutil", ["-convert", "xml1", "-o", "-", `${env.HOME}/Library/Preferences/com.apple.ncprefs.plist`]);
-    if (!xml) return { deliverer, status: "unknown", detail: "could not read notification settings" };
-    return xml.includes(deliverer)
-      ? { deliverer, status: "ok", detail: "allowed to post notifications" }
-      : {
-          deliverer,
-          status: "blocked",
-          detail: `${deliverer} is not allowed to post notifications, so macOS will drop them silently`,
-        };
-  } catch {
-    return { deliverer, status: "unknown", detail: "could not read notification settings" };
+  if (term) return { deliverer: term.name, channel: "terminal", status: "ok", detail: `${term.name} posts them itself, with nothing to allow` };
+
+  if (platform === "darwin") {
+    const who = app ?? env.__CFBundleIdentifier ?? null;
+    return {
+      deliverer: who,
+      channel: "macos",
+      status: "ok",
+      detail: who ? `posted by ${who}` : "posted by Script Editor",
+    };
   }
+  if (platform === "linux") return { deliverer: "notify-send", channel: "linux", status: "ok", detail: "posted by notify-send, if libnotify is installed" };
+  if (platform === "win32") return { deliverer: "powershell", channel: "windows", status: "ok", detail: "posted as a Windows notification via PowerShell" };
+  return { deliverer: null, channel: "none", status: "unsupported", detail: "no desktop notifier on this platform — the bell and the transcript still work" };
 }
 
 /**
@@ -205,7 +254,7 @@ export function alert(cfg, { title = "Marmot", body = "", platform = process.pla
     }
   }
 
-  const c = notifyCommand(platform, title, body, env, n.app ?? null);
+  const c = notifyCommand(platform, title, body, env, n.app ?? null, n.bell ? (n.sound ?? "Ping") : null);
   if (!c) return did;
   try {
     // Detached and unreferenced, so the hook can exit without waiting on it.

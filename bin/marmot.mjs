@@ -388,13 +388,11 @@ if (cmd === "doctor") {
   const d = deliverability({ app: cfg.notify?.app ?? null });
   const notify = !cfg.notify?.desktop
     ? "off in your config"
-    : d.status === "ok"
-      ? `on · ${d.deliverer} may post them`
-      : d.status === "blocked"
-        ? `ON, BUT NOT ARRIVING — ${d.detail}`
-        : d.status === "silenced"
-          ? `muted · ${d.detail}`
-          : `on · ${d.detail}`;
+    : d.status === "silenced"
+      ? `muted · ${d.detail}`
+      : d.status === "unsupported"
+        ? d.detail
+        : `on · ${d.detail}${cfg.notify?.bell ? ", with a sound" : ""}`;
 
   process.stdout.write(`
   Root            ${ROOT}
@@ -403,7 +401,7 @@ if (cmd === "doctor") {
   Priced turns    ${num(sessions.reduce((a, s) => a + s.pricedTurns, 0))} of ${num(t.turns)}
   Unpriced models ${unpriced.size ? [...unpriced].join(", ") : "none"}
   Sessions with 0 typed prompts  ${noPrompts}${noPrompts ? "  (resumed or agent-driven; not a fault)" : ""}
-  Notifications   ${notify}${d.status === "blocked" ? `\n                  Allow notifications for it in System Settings → Notifications,\n                  or set notify.desktop to false to stop trying. The bell and the\n                  line in your transcript are unaffected.` : ""}
+  Notifications   ${notify}${d.channel === "macos" ? `\n                  If none arrive: check Focus is off, then allow notifications for\n                  that app in System Settings. notify.app posts as a different one.` : ""}
 
   Not readable here: lines added/removed (needs the diff), agent-active vs your
   own time (needs OpenTelemetry), and anyone else's sessions — this is one machine.

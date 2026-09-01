@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { notifyCommand, alert, silenced, deliverability, oscNotifier, oscSequence } from "../src/notify.mjs";
+import { notifyCommand, alert, silenced, deliverability, oscNotifier, oscSequence, iconPath } from "../src/notify.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -133,14 +133,8 @@ test("alert passes notify.app through", () => {
   if (did.desktop) assert.match(did.desktop.args[1], /com\.googlecode\.iterm2/);
 });
 
-test("deliverability checks the overriding app, not the host", () => {
-  const d = deliverability({
-    platform: "darwin",
-    env: { __CFBundleIdentifier: "com.microsoft.VSCode", HOME: "/home/me" },
-    app: "com.googlecode.iterm2",
-    run: () => "<plist>com.googlecode.iterm2</plist>",
-  });
-  assert.equal(d.status, "ok");
+test("deliverability reports the overriding app, not the host", () => {
+  const d = deliverability({ platform: "darwin", env: { __CFBundleIdentifier: "com.microsoft.VSCode" }, app: "com.googlecode.iterm2" });
   assert.equal(d.deliverer, "com.googlecode.iterm2");
 });
 
@@ -154,44 +148,102 @@ test("a host bundle id cannot break out of the script either", () => {
   assert.equal((c.args[1].match(/"/g) ?? []).length, 6, "id, body and title: three quoted strings, no more");
 });
 
-test("deliverability reports a blocked app rather than staying quiet", () => {
-  // The plist lists every app that may post. An app absent from it is dropped.
-  const listed = deliverability({
-    platform: "darwin",
-    env: { __CFBundleIdentifier: "com.googlecode.iterm2", HOME: "/home/me" },
-    run: () => "<plist>com.googlecode.iterm2</plist>",
-  });
-  assert.equal(listed.status, "ok");
-  assert.equal(listed.deliverer, "com.googlecode.iterm2");
-
-  const missing = deliverability({
-    platform: "darwin",
-    env: { __CFBundleIdentifier: "com.microsoft.VSCode", HOME: "/home/me" },
-    run: () => "<plist>com.googlecode.iterm2</plist>",
-  });
-  assert.equal(missing.status, "blocked");
-  assert.match(missing.detail, /drop them silently/);
+test("the notification carries a sound when the bell is on", () => {
+  // A terminal BEL needs a controlling terminal and a terminal that rings.
+  // The notification's own sound is audible wherever the notification is.
+  const withSound = notifyCommand("darwin", "Marmot", "reached $82.50", quiet, null, "Ping");
+  assert.match(withSound.args[1], /sound name "Ping"$/);
+  assert.doesNotMatch(notifyCommand("darwin", "Marmot", "x", quiet, null, null).args[1], /sound name/);
 });
 
-test("deliverability degrades to unknown rather than throwing", () => {
-  const thrown = deliverability({ platform: "darwin", env: { HOME: "/home/me" }, run: () => { throw new Error("no plutil"); } });
-  assert.equal(thrown.status, "unknown");
-  assert.equal(thrown.deliverer, "com.apple.ScriptEditor2", "which is what a plain notification posts as");
+test("alert asks for a sound only when the bell is configured", () => {
+  const s = fakeStream();
+  const on = alert({ notify: { bell: true, desktop: true, sound: "Glass" } }, { body: "x", platform: "darwin", stream: s, env: quiet, ttyPath: null });
+  if (on.desktop) assert.match(on.desktop.args[1], /sound name "Glass"/);
+  const off = alert({ notify: { bell: false, desktop: true } }, { body: "x", platform: "darwin", stream: s, env: quiet, ttyPath: null });
+  if (off.desktop) assert.doesNotMatch(off.desktop.args[1], /sound name/);
+});
 
-  assert.equal(deliverability({ platform: "darwin", env: { HOME: "/x" }, run: () => "" }).status, "unknown");
-  assert.equal(deliverability({ platform: "linux", env: {} }).status, "unknown");
+test("doctor names the channel and never calls a working setup broken", () => {
+  // An earlier version read com.apple.ncprefs and reported "blocked" for an app
+  // that was merely unregistered — then delivery from exactly such an app
+  // worked. A false alarm that talks someone out of a working feature is worse
+  // than no check.
+  const mac = deliverability({ platform: "darwin", env: { __CFBundleIdentifier: "com.microsoft.VSCode" } });
+  assert.equal(mac.status, "ok");
+  assert.equal(mac.channel, "macos");
+  assert.match(mac.detail, /com\.microsoft\.VSCode/);
+
+  assert.equal(deliverability({ platform: "linux", env: {} }).channel, "linux");
+  assert.equal(deliverability({ platform: "win32", env: {} }).channel, "windows", "Windows has a notifier now");
   assert.equal(deliverability({ platform: "darwin", env: { MARMOT_NO_NOTIFY: "1" } }).status, "silenced");
 });
 
 test("Linux gets notify-send", () => {
   const c = notifyCommand("linux", "Marmot", "a nudge");
   assert.equal(c.cmd, "notify-send");
-  assert.deepEqual(c.args, ["--app-name=Marmot", "Marmot", "a nudge"]);
+  // The icon is included when it is on disk, which it is in a checkout.
+  assert.equal(c.args[0], "--app-name=Marmot");
+  assert.deepEqual(c.args.slice(-2), ["Marmot", "a nudge"]);
 });
 
-test("a platform with no dependable notifier gets none", () => {
-  assert.equal(notifyCommand("win32", "Marmot", "a nudge"), null);
+test("the marmot is shipped as both an SVG and an ICO", () => {
+  // Linux takes any image path; Windows needs an .ico specifically. macOS shows
+  // the posting application's icon and gives us no say, so there is nothing to
+  // ship for it.
+  assert.ok(iconPath("svg"), "the SVG the README uses");
+  assert.ok(iconPath("ico"), "and the ICO Windows needs");
+  assert.equal(iconPath("nonexistent-kind"), null, "a missing icon is null, not a throw");
+});
+
+test("Linux is given the marmot to show", () => {
+  const c = notifyCommand("linux", "Marmot", "a nudge", quiet, null, null);
+  const i = c.args.indexOf("-i");
+  assert.ok(i > 0, "notify-send takes an icon path");
+  assert.match(c.args[i + 1], /marmot\.svg$/);
+});
+
+test("Windows loads the icon file rather than a system glyph", () => {
+  const ps = notifyCommand("win32", "Marmot", "a nudge", quiet, null, null).args[5];
+  assert.match(ps, /New-Object System\.Drawing\.Icon\('.*marmot\.ico'\)/);
+  assert.doesNotMatch(ps, /SystemIcons/, "the fallback is only for when the file is missing");
+});
+
+test("Windows gets a real notification, with nothing to install", () => {
+  // NotifyIcon ships with the .NET Framework present on every Windows since 7,
+  // and Windows 10/11 render its balloon as a toast. BurntToast would be nicer
+  // and is installed nowhere by default.
+  const c = notifyCommand("win32", "Marmot · cost cap", "reached $82.50", quiet, null, "Ping");
+  assert.equal(c.cmd, "powershell");
+  assert.deepEqual(c.args.slice(0, 4), ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden"]);
+  const ps = c.args[5];
+  assert.match(ps, /NotifyIcon/);
+  assert.match(ps, /marmot\.ico/, "and it is the marmot");
+  assert.match(ps, /ShowBalloonTip\(8000\)/);
+  assert.match(ps, /SystemSounds\]::Asterisk\.Play/, "the bell, on Windows");
+  assert.match(ps, /\$82\.50/, "figures survive: $ is inert in a single-quoted PowerShell string");
+  assert.match(ps, /Start-Sleep/, "the icon must outlive the balloon or nothing shows");
+});
+
+test("a Windows notification cannot be broken out of by an apostrophe", () => {
+  // The only escape inside a PowerShell single-quoted literal is a doubled
+  // quote, so that is the one thing that has to be handled.
+  const c = notifyCommand("win32", "Marmot", "it's over, 'quoted' text", quiet, null, null);
+  assert.match(c.args[5], /'it''s over, ''quoted'' text'/);
+  assert.doesNotMatch(c.args[5], /SystemSounds/, "and no sound when the bell is off");
+});
+
+test("Linux asks notify-send for a sound only when the bell is on", () => {
+  const withSound = notifyCommand("linux", "Marmot", "a nudge", quiet, null, "Ping");
+  assert.ok(withSound.args.includes("--hint=string:sound-name:message-new-instant"));
+  const without = notifyCommand("linux", "Marmot", "a nudge", quiet, null, null);
+  assert.ok(!without.args.some((a) => a.startsWith("--hint")));
+});
+
+test("an unknown platform gets no notifier, and says so", () => {
   assert.equal(notifyCommand("freebsd", "Marmot", "a nudge"), null);
+  assert.equal(deliverability({ platform: "freebsd", env: {} }).status, "unsupported");
+  assert.equal(deliverability({ platform: "win32", env: {} }).channel, "windows");
 });
 
 test("an empty body raises nothing", () => {
@@ -288,9 +340,9 @@ test("a stream that throws does not take the nudge down with it", () => {
   assert.doesNotThrow(() => alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: bad, env: quiet, ttyPath: null }));
 });
 
-test("an unwritable platform still rings the bell", () => {
+test("a platform with no notifier still rings the bell", () => {
   const s = fakeStream();
-  const did = alert(DEFAULTS, { body: "a nudge", platform: "win32", stream: s, env: quiet, ttyPath: null });
-  assert.equal(did.bell, "stderr", "Windows gets the bell even without a popup");
+  const did = alert(DEFAULTS, { body: "a nudge", platform: "freebsd", stream: s, env: quiet, ttyPath: null });
+  assert.equal(did.bell, "stderr");
   assert.equal(did.desktop, null);
 });

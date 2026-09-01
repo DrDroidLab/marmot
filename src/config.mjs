@@ -81,8 +81,12 @@ export const DEFAULTS = {
     // macOS only lists apps that have registered themselves, and an app that
     // is not listed cannot be allowed — so point this at one that is (a bundle
     // id like "com.googlecode.iterm2", or an app name like "Script Editor").
-    // `marmot doctor` says whether the current one may actually post.
+    // `marmot doctor` says which channel is in force.
     app: null,
+    // The notification's own sound, used when `bell` is on. A terminal BEL
+    // needs a controlling terminal and a terminal that rings; this does not.
+    // Any macOS sound name works — Ping, Glass, Submarine, Funk.
+    sound: "Ping",
   },
 
   cache: { minHitRate: 0.7, minTurns: 20 },
