@@ -45,7 +45,8 @@ if (has("help") || cmd === "help") {
     browse            Build a local web page of your sessions and open it
     nudges            Only the nudges
     sessions          Every session in the window, one per line
-    init              Write ${configPath(ROOT)} with the default thresholds
+    init              Write ${configPath(ROOT)} with the default thresholds.
+                      --hooks installs the nudges, --statusline the statusline
     config            Open that thresholds file (creating it if it is missing)
     mcp-audit         Ask each configured MCP server for its tools, and measure
                       what their definitions cost on every request
@@ -56,6 +57,7 @@ if (has("help") || cmd === "help") {
     --root <dir>      Claude Code home, default ~/.claude
     --json            Machine-readable output
     --demo            Run against synthetic sessions, not your own
+    --hooks           With init: install the nudge hooks, no plugin needed
     --statusline      With init: also install the statusline
 
   report only
@@ -95,6 +97,50 @@ if (cmd === "init") {
     writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
     process.stdout.write(`Wrote ${cfg._path}\n  Every threshold is in there. Edit freely — nothing else reads this file.\n`);
   }
+  // Hooks are ordinary settings entries. The plugin is a convenient way to get
+  // them, not the only one — installed here they work from a global CLI, which
+  // is a far shorter road than the marketplace dance.
+  if (has("hooks")) {
+    const sp = `${ROOT}/settings.json`;
+    let settings = {};
+    try {
+      settings = JSON.parse(readFileSync(sp, "utf8"));
+    } catch {
+      /* absent or malformed; a fresh object is written below */
+    }
+    const self = new URL("../scripts/hook.mjs", import.meta.url).pathname;
+    const entry = (timeout) => ({ hooks: [{ type: "command", command: `node "${self}"`, timeout }] });
+    const mine = (group) => (group?.hooks ?? []).some((h) => String(h.command ?? "").includes("marmot"));
+
+    settings.hooks ??= {};
+    let changed = false;
+    for (const [event, timeout] of [["SessionStart", 20], ["Stop", 15]]) {
+      const groups = (settings.hooks[event] ??= []);
+      const existing = groups.findIndex(mine);
+      if (existing >= 0) {
+        if (!has("force")) continue;
+        groups[existing] = entry(timeout);
+      } else {
+        groups.push(entry(timeout));
+      }
+      changed = true;
+    }
+
+    if (!changed) {
+      process.stdout.write(`\nMarmot's hooks are already in ${sp}. Re-run with --force to replace them.\n`);
+    } else {
+      try {
+        writeFileSync(sp, JSON.stringify(settings, null, 2) + "\n");
+        process.stdout.write(
+          `\nInstalled the hooks in ${sp}.\n` +
+            `  Restart Claude Code, and you get the daily digest and live nudges without the plugin.\n`,
+        );
+      } catch (e) {
+        process.stdout.write(`\nCould not write ${sp}: ${e.message}\n`);
+      }
+    }
+  }
+
   if (has("statusline")) {
     const sp = `${ROOT}/settings.json`;
     let settings = {};

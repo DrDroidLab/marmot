@@ -4,8 +4,9 @@
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/AQ3tusPtZn)
 
 > **Alpha.** This is early software, and it reads a file format that is internal
-> and undocumented — a Claude Code update can break a metric. `marmot doctor`
-> shows what's still readable on your machine. Bugs and ideas are welcome, in
+> and undocumented — a Claude Code update can break a metric. Running
+> `node bin/marmot.mjs doctor` shows what's still readable on your machine.
+> Bugs and ideas are welcome, in
 > [issues](https://github.com/DrDroidLab/marmot/issues) or on
 > [Discord](https://discord.gg/AQ3tusPtZn).
 
@@ -51,8 +52,8 @@ Check it loaded — the status line, not the component count:
 claude plugin list | grep -A4 'marmot@'    # Status: ✔ enabled
 ```
 
-**As a CLI**, for the commands the plugin does not expose — `browse`,
-`mcp-audit`, `doctor`:
+**As a CLI**, for the commands the plugin does not expose — `mcp-audit`,
+`doctor`, `nudges`, `sessions`:
 
 ```bash
 git clone https://github.com/DrDroidLab/marmot && cd marmot
@@ -123,7 +124,7 @@ mark you pass on the way to a limit.
 ## The evidence behind every nudge
 
 A nudge you cannot trace produces suspicion rather than a change of habit, so
-`marmot` prints the window every figure came from:
+Marmot prints the window every figure came from:
 
 ```
   Marmot · your last 30 days
@@ -211,20 +212,23 @@ other, wrong for finance.
 
 ## Usage
 
+Two commands inside Claude Code; everything else runs from the clone. There is
+no `marmot` on your PATH yet — it is `node bin/marmot.mjs <command>`.
+
 | Command | Slash command | What it does |
 |---|---|---|
-| `marmot` | `/marmot:usage` | Nudges, plus the window they came from |
-| `marmot config` | `/marmot:config` | Open the thresholds file |
-| `marmot browse` | | Build the session browser page and open it |
-| `marmot nudges` | | Just the nudges, nothing else |
-| `marmot sessions` | | One line per session |
-| `marmot mcp-audit` | | Measure what each MCP server's tool definitions cost |
-| `marmot doctor` | | What's readable on this machine, and what isn't |
-| `marmot init` | | Write the thresholds file |
+| `node bin/marmot.mjs` | `/marmot:usage` | Nudges, plus the window they came from |
+| `node bin/marmot.mjs config` | `/marmot:config` | Open the thresholds file |
+| `node bin/marmot.mjs browse` | | Build the session browser page and open it |
+| `node bin/marmot.mjs nudges` | | Just the nudges, nothing else |
+| `node bin/marmot.mjs sessions` | | One line per session |
+| `node bin/marmot.mjs mcp-audit` | | Measure what each MCP server's tool definitions cost |
+| `node bin/marmot.mjs doctor` | | What's readable on this machine, and what isn't |
+| `node bin/marmot.mjs init` | | Write the thresholds file |
 
-`/marmot:usage` is the one to reach for. `marmot nudges` is the same findings
-with the reporting stripped out, which is what you want in a script or a
-pre-commit hook.
+`/marmot:usage` is the one to reach for, and the flags below pass straight
+through it — `/marmot:usage --days 7`. `nudges` is the same findings with the
+reporting stripped out, which is what you want in a script or a pre-commit hook.
 
 | Flag | |
 |---|---|
@@ -242,7 +246,7 @@ pre-commit hook.
 
 ### Chasing a nudge to its source
 
-`marmot` builds the page and opens it every run — `--no-browse` keeps things in
+Every run builds the page and opens it — `--no-browse` keeps things in
 the terminal. Each run writes a **new file**, stamped to the minute, so the
 browser can never serve you a cached copy of an earlier one.
 
@@ -289,8 +293,8 @@ most of your sessions it is describing how you work rather than flagging
 anything, and it should be raised, not ignored.
 
 ```bash
-marmot config          # opens ~/.claude/marmot.json, creating it if you have none
-marmot config --print  # ...and print it to the terminal
+node bin/marmot.mjs config          # opens ~/.claude/marmot.json, creating it if you have none
+node bin/marmot.mjs config --print  # ...and print it to the terminal
 ```
 
 or `/marmot:config` inside Claude Code. Nothing needs restarting — the next run
@@ -408,7 +412,7 @@ them work.
 }
 ```
 
-`marmot config` writes every key with its default — these are the ones worth
+`config` writes every key with its default — these are the ones worth
 knowing about.
 
 **The dollar caps do not fire on a subscription at all.** `session.costCap` and
@@ -428,7 +432,7 @@ is treated as billed, which is the safer way round.
 via an OSC escape sequence — iTerm2, Ghostty, WezTerm, kitty, Konsole, Windows
 Terminal and Hyper all support this, with nothing to install or allow.
 Otherwise the OS does: `osascript`, `notify-send` or PowerShell, all of which
-ship with it. `marmot doctor` names the channel in force.
+ship with it. `doctor` names the channel in force.
 
 Terminals not known to support the sequence are never sent one, since an
 unrecognised escape code can print as visible garbage. The marmot appears on
@@ -449,7 +453,7 @@ Marmot will help until it is off.
 | **KDE Plasma** | System Settings → **Notifications** → *Do Not Disturb* off. |
 
 **Then check the app is allowed.** On macOS, System Settings → Notifications →
-the app `marmot doctor` names. If it is not in that list it cannot be granted —
+the app `doctor` names. If it is not in that list it cannot be granted —
 macOS only lists apps that have registered themselves — so point Marmot at one
 that is: `"notify": { "app": "com.googlecode.iterm2" }`, a bundle id or an app
 name. On Windows, allow notifications from PowerShell. On Linux, `notify-send`
@@ -464,7 +468,7 @@ output is a pipe Claude Code reads, not a terminal, so stderr would swallow the
 BEL. `notify.sound` names it; *Ping* by default.
 
 **Measuring MCP servers less often.** Raise `mcp.auditMaxAgeDays`, or set
-`mcp.autoAudit` to `false` and run `marmot mcp-audit` when it suits you.
+`mcp.autoAudit` to `false` and run `mcp-audit` when it suits you.
 
 **Starting the nudges over.** `~/.claude/marmot-state.json` records what has
 already been said. Delete it to hear everything again.
@@ -485,7 +489,7 @@ And a "turn" means **a prompt you typed**. Tool results arrive as user entries t
 
 Everything runs locally. Nothing is uploaded, and there is no service to upload it to — no account, no API key, no server.
 
-The **report** reads only counts, identifiers and tool names, never your prompt or response text. To name your plan and its limits it reads `~/.claude.json`, taking the rate-limit tier and the cached utilisation percentages — never the email address, account ids or organisation name that sit beside them. The **browser page** does read them, because that is the point of it; `marmot browse --no-text` leaves the text out if you want to share it.
+The **report** reads only counts, identifiers and tool names, never your prompt or response text. To name your plan and its limits it reads `~/.claude.json`, taking the rate-limit tier and the cached utilisation percentages — never the email address, account ids or organisation name that sit beside them. The **browser page** does read them, because that is the point of it; `browse --no-text` leaves the text out if you want to share it.
 
 Tool *results* are never stored — around 95% of the bytes on disk, and dropping them is what turns a 41MB transcript into a 1MB page.
 
