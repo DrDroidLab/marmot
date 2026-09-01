@@ -546,6 +546,9 @@ if (cmd === "doctor") {
       : d.status === "unsupported"
         ? d.detail
         : `on · ${d.detail}${cfg.notify?.bell ? ", with a sound" : ""}`;
+  // macOS decides whether a notification waits for you or fades, and only the
+  // user can change it — so say where, rather than leaving it a mystery.
+  const persistNote = cfg.notify?.desktop && cfg.notify?.persist !== false && d.persistHint ? `\n                  ${d.persistHint}` : "";
 
   // Whether the nudges are actually wired up. "Installed" and "working" are
   // different states, and the gap between them is silent.
@@ -581,7 +584,7 @@ if (cmd === "doctor") {
   Unpriced models ${unpriced.size ? [...unpriced].join(", ") : "none"}
   Sessions with 0 typed prompts  ${noPrompts}${noPrompts ? "  (resumed or agent-driven; not a fault)" : ""}
   Nudge hooks     ${hooks}
-  Notifications   ${notify}${d.channel === "macos" ? `\n                  If none arrive: check Focus is off, then allow notifications for\n                  that app in System Settings. notify.app posts as a different one.` : ""}
+  Notifications   ${notify}${persistNote}${d.channel === "macos" ? `\n                  If none arrive: check Focus is off, then allow notifications for\n                  that app in System Settings. notify.app posts as a different one.` : ""}
 
   Not readable here: lines added/removed (needs the diff), agent-active vs your
   own time (needs OpenTelemetry), and anyone else's sessions — this is one machine.

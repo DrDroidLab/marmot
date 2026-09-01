@@ -346,3 +346,61 @@ test("a platform with no notifier still rings the bell", () => {
   assert.equal(did.bell, "stderr");
   assert.equal(did.desktop, null);
 });
+
+/* ── staying put until dismissed ───────────────────────────────────────── */
+
+test("persistence is on by default", () => {
+  assert.equal(DEFAULTS.notify.persist, true);
+});
+
+test("Linux is asked for critical urgency, which is what stops it expiring", () => {
+  const on = notifyCommand("linux", "Marmot", "a nudge", quiet, null, null, true);
+  const i = on.args.indexOf("-u");
+  assert.equal(on.args[i + 1], "critical");
+  assert.ok(on.args.includes("-t") && on.args[on.args.indexOf("-t") + 1] === "0");
+
+  const off = notifyCommand("linux", "Marmot", "a nudge", quiet, null, null, false);
+  assert.ok(!off.args.includes("-u"));
+});
+
+test("Windows holds the balloon up, and holds the icon up with it", () => {
+  const on = notifyCommand("win32", "Marmot", "a nudge", quiet, null, null, true).args[5];
+  assert.match(on, /ShowBalloonTip\(60000\)/);
+  // The icon has to outlive the balloon or the balloon goes with it.
+  assert.match(on, /Start-Sleep -Seconds 61/);
+
+  const off = notifyCommand("win32", "Marmot", "a nudge", quiet, null, null, false).args[5];
+  assert.match(off, /ShowBalloonTip\(8000\)/);
+});
+
+test("macOS cannot be told, so it is told to the user instead", () => {
+  // `display notification` has no persistence option at all — it is a syntax
+  // error. Whether one waits or fades is the delivering app's Alert style,
+  // which only a person can set.
+  const withHost = deliverability({ platform: "darwin", env: { __CFBundleIdentifier: "com.googlecode.iterm2" } });
+  assert.match(withHost.persistHint, /Alert style: Alerts/);
+  assert.match(withHost.persistHint, /iterm2/);
+
+  // And the AppleScript itself carries nothing about it either way.
+  const script = notifyCommand("darwin", "Marmot", "a nudge", quiet, null, null, true).args[1];
+  assert.doesNotMatch(script, /persist|timeout|urgency/i);
+});
+
+test("alert passes persistence through, and off means off", () => {
+  // Asserted on the command rather than by spawning one: this suite must not
+  // depend on notify-send existing, nor leave a process behind.
+  const on = notifyCommand("linux", "Marmot", "x", quiet, null, null, true);
+  assert.ok(on.args.includes("critical"));
+  const off = notifyCommand("linux", "Marmot", "x", quiet, null, null, false);
+  assert.ok(!off.args.includes("critical"));
+});
+
+test("a binary that is not there cannot take the process down with it", () => {
+  // spawn reports failure asynchronously, as an `error` event. try/catch never
+  // sees it, and an unhandled one is fatal — which would kill the very nudge it
+  // was announcing.
+  const s = fakeStream();
+  assert.doesNotThrow(() =>
+    alert({ notify: { desktop: true, bell: false } }, { body: "x", platform: "linux", stream: s, env: quiet, ttyPath: null }),
+  );
+});

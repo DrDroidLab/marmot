@@ -439,7 +439,8 @@ them work.
 
   // How a nudge reaches you, beyond the line in the transcript.
   // "app" overrides which macOS app posts the notification — see below.
-  "notify": { "desktop": true, "bell": true, "app": null, "sound": "Ping" },
+  "notify": { "desktop": true, "bell": true, "app": null, "sound": "Ping",
+               "persist": true },
 
   // "off" stops the daily digest entirely.
   "digest": { "cadence": "daily" },
@@ -511,6 +512,16 @@ needs libnotify (`libnotify-bin` on Debian and Ubuntu).
 
 Or set `notify.desktop` to `false` — the bell and the nudge in your transcript
 are unaffected either way.
+
+**Making them wait for you.** `notify.persist` is on by default and means "stay
+up until dismissed", as far as each platform allows:
+
+| | What it does |
+|---|---|
+| **Linux** | Sent at critical urgency, which is what stops a notification daemon expiring it. |
+| **Windows** | The balloon is held up for a minute, and lands in the Action Centre regardless. |
+| **macOS** | Nothing Marmot can do — `display notification` has no persistence option at all. Whether one waits or fades is the **Alert style** of the app posting it: System Settings → Notifications → *that app* → **Alert style: Alerts**. `marmot doctor` names the app and repeats this. |
+| **Terminal** | The terminal's own notification, on its own terms. |
 
 **About the bell.** `notify.bell` writes a terminal BEL to `/dev/tty`, and asks
 the notification to play a sound. The sound is the reliable half: a hook's

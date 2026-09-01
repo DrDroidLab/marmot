@@ -85,7 +85,7 @@ export function oscSequence(notifier, title, body) {
  * The command that raises a desktop notification on this platform, or null
  * where there isn't one we can rely on being installed.
  */
-export function notifyCommand(platform, title, body, env = process.env, app = null, sound = null) {
+export function notifyCommand(platform, title, body, env = process.env, app = null, sound = null, persist = false) {
   const t = clean(title, 60);
   const b = clean(body);
   if (!b) return null;
@@ -114,7 +114,16 @@ export function notifyCommand(platform, title, body, env = process.env, app = nu
     const icon = iconPath("svg");
     return {
       cmd: "notify-send",
-      args: ["--app-name=Marmot", ...(icon ? ["-i", icon] : []), ...(sound ? ["--hint=string:sound-name:message-new-instant"] : []), t, b],
+      args: [
+        "--app-name=Marmot",
+        ...(icon ? ["-i", icon] : []),
+        // Critical urgency is what actually stops a daemon expiring it; the
+        // zero timeout is a hint most of them honour and GNOME ignores.
+        ...(persist ? ["-u", "critical", "-t", "0"] : []),
+        ...(sound ? ["--hint=string:sound-name:message-new-instant"] : []),
+        t,
+        b,
+      ],
     };
   }
   if (platform === "win32") {
@@ -134,9 +143,9 @@ export function notifyCommand(platform, title, body, env = process.env, app = nu
       `$n.BalloonTipTitle=${psQuote(t)};`,
       `$n.BalloonTipText=${psQuote(b)};`,
       "$n.Visible=$true;",
-      "$n.ShowBalloonTip(8000);",
+      `$n.ShowBalloonTip(${persist ? 60000 : 8000});`,
       sound ? "[System.Media.SystemSounds]::Asterisk.Play();" : "",
-      "Start-Sleep -Seconds 9;",
+      `Start-Sleep -Seconds ${persist ? 61 : 9};`,
       "$n.Dispose()",
     ]
       .filter(Boolean)
@@ -195,6 +204,12 @@ export function deliverability({ platform = process.platform, env = process.env,
       channel: "macos",
       status: "ok",
       detail: who ? `posted by ${who}` : "posted by Script Editor",
+      // `display notification` has no persistence option — whether a
+      // notification waits for you or fades is the delivering app's Alert
+      // style, which only the user can set.
+      persistHint: who
+        ? `to stop them fading: System Settings → Notifications → ${who.split(".").pop()} → Alert style: Alerts`
+        : null,
     };
   }
   if (platform === "linux") return { deliverer: "notify-send", channel: "linux", status: "ok", detail: "posted by notify-send, if libnotify is installed" };
@@ -254,14 +269,19 @@ export function alert(cfg, { title = "Marmot", body = "", platform = process.pla
     }
   }
 
-  const c = notifyCommand(platform, title, body, env, n.app ?? null, n.bell ? (n.sound ?? "Ping") : null);
+  const c = notifyCommand(platform, title, body, env, n.app ?? null, n.bell ? (n.sound ?? "Ping") : null, n.persist !== false);
   if (!c) return did;
   try {
     // Detached and unreferenced, so the hook can exit without waiting on it.
-    spawn(c.cmd, c.args, { detached: true, stdio: "ignore" }).unref();
+    const child = spawn(c.cmd, c.args, { detached: true, stdio: "ignore" });
+    // A spawn failure arrives asynchronously, as an `error` event — try/catch
+    // never sees it, and an unhandled one takes the whole process down. On a
+    // box with no notify-send that would kill the nudge it was announcing.
+    child.on("error", () => {});
+    child.unref();
     did.desktop = c;
   } catch {
-    /* no notification daemon, a missing binary — the nudge still stands */
+    /* a missing binary, a daemon that is not there — the nudge still stands */
   }
   return did;
 }

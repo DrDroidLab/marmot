@@ -132,6 +132,11 @@ export const DEFAULTS = {
     // needs a controlling terminal and a terminal that rings; this does not.
     // Any macOS sound name works — Ping, Glass, Submarine, Funk.
     sound: "Ping",
+    // Keep the notification up until you dismiss it, where the platform allows
+    // it: critical urgency on Linux, a long-lived balloon on Windows. macOS
+    // gives `display notification` no say — there it is the Alert style you set
+    // for the posting app, and `marmot doctor` says where.
+    persist: true,
   },
 
   cache: { minHitRate: 0.7, minTurns: 20 },
