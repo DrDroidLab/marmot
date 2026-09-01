@@ -170,6 +170,12 @@ marmot config --print  # ...and print it to the terminal
 or `/marmot:config` inside Claude Code. Nothing needs restarting — the next run
 reads it.
 
+It opens in a real text editor, not a preview: `$VISUAL`/`$EDITOR` if you have
+one set, otherwise your default text editor on macOS, Notepad on Windows,
+`xdg-open` on Linux. A terminal editor like vim is only used when there is a
+terminal to attach it to, so `/marmot:config` inside Claude Code opens a window
+instead of hanging.
+
 ### The nudge thresholds
 
 | Rule | Fires when | Default |
@@ -252,7 +258,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 218 tests, no dependencies, ~5s
+npm test        # 229 tests, no dependencies, ~5s
 ```
 
 ## License

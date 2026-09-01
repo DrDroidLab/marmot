@@ -85,6 +85,7 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/notify.mjs` | Bell + desktop notification. Never throws; `MARMOT_NO_NOTIFY` mutes it. |
 | `src/skills.mjs` | Skill sizes, read from SKILL.md on disk. |
 | `src/mcp.mjs` | Server discovery, and the audit client. The only code that starts a process. |
+| `src/open.mjs` | Which editor opens the config, per OS. `open -t`, not `open`. |
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
 | `src/render.mjs` | Terminal output. |
@@ -164,7 +165,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 218 tests, node:test, no dependencies
+npm test        # 229 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

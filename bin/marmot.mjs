@@ -127,16 +127,9 @@ if (cmd === "config") {
   if (has("print")) process.stdout.write(`\n${readFileSync(cfg._path, "utf8")}`);
 
   if (!has("no-open")) {
-    const { execFile, spawnSync } = await import("node:child_process");
-    const editor = process.env.VISUAL || process.env.EDITOR;
-    if (editor && process.stdout.isTTY) {
-      // A terminal editor needs a terminal. We only have one when stdout is a
-      // TTY — run from a slash command it is captured, and vim would hang.
-      spawnSync(editor, [cfg._path], { stdio: "inherit", shell: true });
-    } else {
-      const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-      execFile(opener, [cfg._path], () => {});
-    }
+    const { openInEditor } = await import("../src/open.mjs");
+    const opened = openInEditor(cfg._path, { isTty: Boolean(process.stdout.isTTY) });
+    if (!opened.wait) process.stdout.write(dim(`Opening in ${opened.source}.\n`));
   }
   process.exit(0);
 }
