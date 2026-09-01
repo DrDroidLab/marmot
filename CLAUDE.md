@@ -146,7 +146,15 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    through literally and became "your last NaN days". `posInt()` in the CLI now
    guards this, but don't reintroduce the pattern.
 
-4. **A slash command in a session whose plugin was just removed prints nothing
+4. **macOS drops notifications from unauthorised apps silently.** `osascript`
+   exits 0 and nothing appears. A plain `display notification` is posted by
+   *Script Editor*, which almost nobody has authorised — so the notification has
+   to be attributed to the host terminal via `__CFBundleIdentifier`, and even
+   that fails if the terminal itself was never allowed. `deliverability()` reads
+   `com.apple.ncprefs` to tell the difference, and `marmot doctor` reports it.
+   Never assume a notification arrived because the command succeeded.
+
+5. **A slash command in a session whose plugin was just removed prints nothing
    at all.** `${CLAUDE_PLUGIN_ROOT}` empties, the command becomes
    `node "/bin/marmot.mjs"`, node writes *Cannot find module* to stderr, and the
    slash command surfaces an empty result — it reads as "the report is broken"
@@ -155,7 +163,7 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    anything. `claude plugin list` also keeps reporting the old state until then,
    including `✔ enabled` for a plugin you have just uninstalled.
 
-5. **`claude plugin install` has no `--force`.** To pick up changes:
+6. **`claude plugin install` has no `--force`.** To pick up changes:
    ```bash
    claude plugin marketplace update marmot
    claude plugin uninstall marmot && claude plugin install marmot@marmot
@@ -171,7 +179,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 233 tests, node:test, no dependencies
+npm test        # 238 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

@@ -381,6 +381,21 @@ if (cmd === "doctor") {
   const t = totals(sessions);
   const unpriced = new Set(sessions.flatMap((s) => [...s.unpricedModels]));
   const noPrompts = sessions.filter((s) => s.typedPrompts === 0).length;
+
+  // A notification that is accepted and silently dropped is worse than none,
+  // so say plainly whether one would actually arrive.
+  const { deliverability } = await import("../src/notify.mjs");
+  const d = deliverability();
+  const notify = !cfg.notify?.desktop
+    ? "off in your config"
+    : d.status === "ok"
+      ? `on · ${d.deliverer} may post them`
+      : d.status === "blocked"
+        ? `ON, BUT NOT ARRIVING — ${d.detail}`
+        : d.status === "silenced"
+          ? `muted · ${d.detail}`
+          : `on · ${d.detail}`;
+
   process.stdout.write(`
   Root            ${ROOT}
   Sessions        ${num(sessions.length)} in ${DAYS} days
@@ -388,6 +403,7 @@ if (cmd === "doctor") {
   Priced turns    ${num(sessions.reduce((a, s) => a + s.pricedTurns, 0))} of ${num(t.turns)}
   Unpriced models ${unpriced.size ? [...unpriced].join(", ") : "none"}
   Sessions with 0 typed prompts  ${noPrompts}${noPrompts ? "  (resumed or agent-driven; not a fault)" : ""}
+  Notifications   ${notify}${d.status === "blocked" ? `\n                  Allow notifications for it in System Settings → Notifications,\n                  or set notify.desktop to false to stop trying. The bell and the\n                  line in your transcript are unaffected.` : ""}
 
   Not readable here: lines added/removed (needs the diff), agent-active vs your
   own time (needs OpenTelemetry), and anyone else's sessions — this is one machine.

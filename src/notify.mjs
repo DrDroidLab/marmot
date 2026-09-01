@@ -14,7 +14,7 @@
  * should cost you the popup, not the nudge.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 
 /**
  * Strip what could break out of the AppleScript string literal we build below,
@@ -31,12 +31,20 @@ const clean = (s, n = 180) =>
  * The command that raises a desktop notification on this platform, or null
  * where there isn't one we can rely on being installed.
  */
-export function notifyCommand(platform, title, body) {
+export function notifyCommand(platform, title, body, env = process.env) {
   const t = clean(title, 60);
   const b = clean(body);
   if (!b) return null;
   if (platform === "darwin") {
-    return { cmd: "osascript", args: ["-e", `display notification "${b}" with title "${t}"`] };
+    // A plain `display notification` is posted by Script Editor, which most
+    // people have never authorised — macOS then accepts it and drops it with no
+    // error at all. Attributing it to the host terminal, which the user has
+    // usually already allowed, is the difference between arriving and not.
+    const host = env?.__CFBundleIdentifier;
+    const script = host
+      ? `tell application id "${clean(host, 80)}" to display notification "${b}" with title "${t}"`
+      : `display notification "${b}" with title "${t}"`;
+    return { cmd: "osascript", args: ["-e", script] };
   }
   if (platform === "linux") {
     // Part of libnotify, present on most desktops. Absent on a headless box,
@@ -50,6 +58,37 @@ export function notifyCommand(platform, title, body) {
 
 /** True when the environment says to stay silent regardless of config. */
 export const silenced = (env = process.env) => Boolean(env.MARMOT_NO_NOTIFY || env.CI);
+
+/**
+ * Whether a notification would actually arrive here.
+ *
+ * macOS keeps per-app notification settings in `com.apple.ncprefs`. An app that
+ * has never been granted permission is simply absent, and anything it posts is
+ * dropped without an error — so `marmot doctor` can say so rather than leaving
+ * you to wonder why the bell rings and nothing appears.
+ */
+export function deliverability({ platform = process.platform, env = process.env, run } = {}) {
+  if (silenced(env)) return { deliverer: null, status: "silenced", detail: "MARMOT_NO_NOTIFY or CI is set" };
+  if (platform !== "darwin") {
+    return { deliverer: platform === "win32" ? null : "notify-send", status: "unknown", detail: "not checkable on this platform" };
+  }
+  const host = env.__CFBundleIdentifier ?? null;
+  const deliverer = host ?? "com.apple.ScriptEditor2";
+  try {
+    const exec = run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"] }));
+    const xml = exec("plutil", ["-convert", "xml1", "-o", "-", `${env.HOME}/Library/Preferences/com.apple.ncprefs.plist`]);
+    if (!xml) return { deliverer, status: "unknown", detail: "could not read notification settings" };
+    return xml.includes(deliverer)
+      ? { deliverer, status: "ok", detail: "allowed to post notifications" }
+      : {
+          deliverer,
+          status: "blocked",
+          detail: `${deliverer} is not allowed to post notifications, so macOS will drop them silently`,
+        };
+  } catch {
+    return { deliverer, status: "unknown", detail: "could not read notification settings" };
+  }
+}
 
 /**
  * Ring the bell and raise the notification, per config. Returns what it did,
@@ -71,7 +110,7 @@ export function alert(cfg, { title = "Marmot", body = "", platform = process.pla
   }
 
   if (!n.desktop || silenced(env)) return did;
-  const c = notifyCommand(platform, title, body);
+  const c = notifyCommand(platform, title, body, env);
   if (!c) return did;
   try {
     // Detached and unreferenced, so the hook can exit without waiting on it.

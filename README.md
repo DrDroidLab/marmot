@@ -234,6 +234,12 @@ above — these are just the ones worth knowing about.
 `notify.desktop` raises a system notification. Set either to `false`.
 `MARMOT_NO_NOTIFY=1` silences both for one run, and CI is silent automatically.
 
+**If no notification ever appears.** macOS accepts a notification from an
+unauthorised app and drops it without an error, so this fails silently by
+default. Run `marmot doctor` — it names the app posting them and says whether
+that app is allowed to. The fix is System Settings → Notifications → your
+terminal. The bell and the line in your transcript are unaffected either way.
+
 **Measuring MCP servers less often.** Raise `mcp.auditMaxAgeDays`, or set
 `mcp.autoAudit` to `false` and run `marmot mcp-audit` when it suits you.
 
@@ -269,7 +275,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 233 tests, no dependencies, ~6s
+npm test        # 238 tests, no dependencies, ~6s
 ```
 
 ## License
