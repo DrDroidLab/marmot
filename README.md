@@ -1,4 +1,4 @@
-# Marmot
+# <img src="docs/marmot.svg" alt="" width="42" align="top"> Marmot
 
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/DrDroidLab/marmot)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/AQ3tusPtZn)

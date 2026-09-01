@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="A marmot sitting upright and whistling">
+  <!-- Colours sit in the mid range on purpose: the same file has to read on
+       GitHub's light and dark themes without a second copy. -->
+  <defs>
+    <clipPath id="body">
+      <ellipse cx="64" cy="94" rx="35" ry="31"/>
+    </clipPath>
+  </defs>
+
+  <!-- the rock it sits on -->
+  <ellipse cx="64" cy="121" rx="46" ry="7" fill="#8A8578" opacity="0.35"/>
+
+  <!-- body -->
+  <ellipse cx="64" cy="94" rx="35" ry="31" fill="#A9764A"/>
+  <g clip-path="url(#body)">
+    <ellipse cx="64" cy="103" rx="23" ry="26" fill="#E0BE93"/>
+  </g>
+
+  <!-- forepaws, tucked the way a marmot holds them -->
+  <ellipse cx="53" cy="88" rx="5.4" ry="7" fill="#8E5F38" transform="rotate(-18 53 88)"/>
+  <ellipse cx="75" cy="88" rx="5.4" ry="7" fill="#8E5F38" transform="rotate(18 75 88)"/>
+
+  <!-- ears -->
+  <circle cx="40" cy="34" r="10" fill="#A9764A"/>
+  <circle cx="88" cy="34" r="10" fill="#A9764A"/>
+  <circle cx="40" cy="34" r="5" fill="#7A4F2E"/>
+  <circle cx="88" cy="34" r="5" fill="#7A4F2E"/>
+
+  <!-- head -->
+  <ellipse cx="64" cy="52" rx="31" ry="28" fill="#BC8654"/>
+
+  <!-- brow, so the face has some structure rather than floating features -->
+  <path d="M44 40q8-6 16-2" stroke="#8E5F38" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M84 40q-8-6-16-2" stroke="#8E5F38" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- muzzle -->
+  <ellipse cx="64" cy="63" rx="17" ry="13" fill="#EBD6BA"/>
+
+  <!-- eyes -->
+  <circle cx="52" cy="49" r="5.5" fill="#2B1F17"/>
+  <circle cx="76" cy="49" r="5.5" fill="#2B1F17"/>
+  <circle cx="53.8" cy="47.2" r="1.9" fill="#FFFFFF"/>
+  <circle cx="77.8" cy="47.2" r="1.9" fill="#FFFFFF"/>
+
+  <!-- nose -->
+  <ellipse cx="64" cy="57" rx="4.6" ry="3.4" fill="#3A2A20"/>
+
+  <!-- the whistle: an open mouth and the two incisors it whistles through -->
+  <ellipse cx="64" cy="69" rx="5" ry="6" fill="#5C3524"/>
+  <rect x="60.4" y="63.6" width="7.2" height="8" rx="1.6" fill="#FFF9EF"/>
+  <line x1="64" y1="64.4" x2="64" y2="70.8" stroke="#D9C7AC" stroke-width="0.9"/>
+
+  <!-- whiskers -->
+  <g stroke="#8E5F38" stroke-width="1.4" stroke-linecap="round" opacity="0.75">
+    <line x1="47" y1="60" x2="33" y2="57"/>
+    <line x1="47" y1="64" x2="32" y2="65"/>
+    <line x1="81" y1="60" x2="95" y2="57"/>
+    <line x1="81" y1="64" x2="96" y2="65"/>
+  </g>
+
+  <!-- the whistle itself, leaving the mouth -->
+  <g fill="none" stroke="#5E8C6A" stroke-width="2.4" stroke-linecap="round" opacity="0.9">
+    <path d="M100 74q6-5 3-11"/>
+    <path d="M108 78q9-7 4-17"/>
+  </g>
+</svg>
