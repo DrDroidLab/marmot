@@ -59,6 +59,8 @@ if (has("help") || cmd === "help") {
     --json            Machine-readable output
     --demo            Run against synthetic sessions, not your own
     --hooks           With init: install the nudge hooks, no plugin needed
+    --dry-run         With --hooks: print what would change, write nothing
+    --remove          With --hooks: take Marmot's hooks back out
     --statusline      With init: also install the statusline
 
   report only
@@ -103,41 +105,69 @@ if (cmd === "init") {
   // is a far shorter road than the marketplace dance.
   if (has("hooks")) {
     const sp = `${ROOT}/settings.json`;
+    const raw = existsSync(sp) ? readFileSync(sp, "utf8") : null;
     let settings = {};
-    try {
-      settings = JSON.parse(readFileSync(sp, "utf8"));
-    } catch {
-      /* absent or malformed; a fresh object is written below */
+    if (raw !== null) {
+      try {
+        settings = JSON.parse(raw);
+      } catch {
+        // Refuse rather than overwrite: a file we cannot parse is one whose
+        // contents we would be destroying.
+        process.stdout.write(`\n${sp} is not valid JSON, so it is left alone. Fix or move it, then re-run.\n`);
+        process.exit(1);
+      }
     }
+
     const self = new URL("../scripts/hook.mjs", import.meta.url).pathname;
     const entry = (timeout) => ({ hooks: [{ type: "command", command: `node "${self}"`, timeout }] });
     const mine = (group) => (group?.hooks ?? []).some((h) => String(h.command ?? "").includes("marmot"));
 
     settings.hooks ??= {};
-    let changed = false;
+    const changes = [];
     for (const [event, timeout] of [["SessionStart", 20], ["Stop", 15]]) {
       const groups = (settings.hooks[event] ??= []);
       const existing = groups.findIndex(mine);
+      if (has("remove")) {
+        if (existing >= 0) {
+          groups.splice(existing, 1);
+          if (!groups.length) delete settings.hooks[event];
+          changes.push(`remove ${event}`);
+        }
+        continue;
+      }
       if (existing >= 0) {
         if (!has("force")) continue;
         groups[existing] = entry(timeout);
+        changes.push(`replace ${event}`);
       } else {
         groups.push(entry(timeout));
+        changes.push(`add ${event}`);
       }
-      changed = true;
     }
+    if (!Object.keys(settings.hooks).length) delete settings.hooks;
 
-    if (!changed) {
-      process.stdout.write(`\nMarmot's hooks are already in ${sp}. Re-run with --force to replace them.\n`);
+    if (!changes.length) {
+      process.stdout.write(
+        has("remove")
+          ? `\nNo Marmot hooks in ${sp}; nothing to remove.\n`
+          : `\nMarmot's hooks are already in ${sp}. Re-run with --force to replace them.\n`,
+      );
+    } else if (has("dry-run")) {
+      process.stdout.write(`\nWould change ${sp}:\n${changes.map((c) => `  ${c}`).join("\n")}\n  Nothing has been written. Drop --dry-run to apply.\n`);
     } else {
       try {
+        // Keep a copy of exactly what was there. This edits a file the user did
+        // not write, so undoing it must not depend on us being right.
+        if (raw !== null) writeFileSync(`${sp}.marmot-backup`, raw);
         writeFileSync(sp, JSON.stringify(settings, null, 2) + "\n");
         process.stdout.write(
-          `\nInstalled the hooks in ${sp}.\n` +
-            `  Restart Claude Code, and you get the daily digest and live nudges without the plugin.\n`,
+          `\n${changes.join(", ")} in ${sp}\n` +
+            (raw !== null ? `  Previous file saved as ${sp}.marmot-backup\n` : "") +
+            (has("remove") ? "" : `  Restart Claude Code for the daily digest and live nudges.\n  Undo any time with: marmot init --hooks --remove\n`),
         );
       } catch (e) {
         process.stdout.write(`\nCould not write ${sp}: ${e.message}\n`);
+        process.exit(1);
       }
     }
   }

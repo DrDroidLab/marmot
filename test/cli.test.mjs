@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpRoot, writeSession, prompt, toolUse, response, usage } from "./helpers.mjs";
@@ -249,6 +249,75 @@ test("what config set writes is what loadConfig reads", async (t) => {
   const cfg = loadConfig(root);
   assert.equal(cfg.session.costCap, 99);
   assert.equal(cfg.limits.enabled, false);
+});
+
+test("installing hooks leaves everything else in settings.json alone", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const sp = join(root, "settings.json");
+  writeFileSync(sp, JSON.stringify({
+    statusLine: { type: "command", command: "mine" },
+    permissions: { allow: ["Bash"] },
+    hooks: { Stop: [{ hooks: [{ type: "command", command: "someone-elses-hook" }] }] },
+  }));
+
+  run(["init", "--hooks", "--root", root]);
+  const after = JSON.parse(readFileSync(sp, "utf8"));
+  assert.deepEqual(after.statusLine, { type: "command", command: "mine" });
+  assert.deepEqual(after.permissions, { allow: ["Bash"] });
+  assert.ok(after.hooks.Stop.some((g) => g.hooks.some((h) => h.command === "someone-elses-hook")), "another tool's hook survives");
+  assert.equal(after.hooks.Stop.length, 2, "and ours is added beside it");
+});
+
+test("installing hooks keeps a copy of what was there", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const sp = join(root, "settings.json");
+  const before = JSON.stringify({ statusLine: { type: "command", command: "mine" } });
+  writeFileSync(sp, before);
+
+  run(["init", "--hooks", "--root", root]);
+  assert.equal(readFileSync(`${sp}.marmot-backup`, "utf8"), before, "byte for byte, so undoing does not depend on us being right");
+});
+
+test("--dry-run writes nothing at all", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const sp = join(root, "settings.json");
+  const { out } = run(["init", "--hooks", "--dry-run", "--root", root]);
+  assert.match(out, /Would change/);
+  assert.match(out, /add SessionStart/);
+  assert.match(out, /Nothing has been written/);
+  assert.equal(existsSync(sp), false, "no file appeared");
+});
+
+test("--remove takes out only Marmot's own hooks", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const sp = join(root, "settings.json");
+  writeFileSync(sp, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "someone-elses-hook" }] }] } }));
+
+  run(["init", "--hooks", "--root", root]);
+  run(["init", "--hooks", "--remove", "--root", root]);
+
+  const after = JSON.parse(readFileSync(sp, "utf8"));
+  assert.deepEqual(after.hooks.Stop, [{ hooks: [{ type: "command", command: "someone-elses-hook" }] }]);
+  assert.ok(!after.hooks.SessionStart, "and the event we emptied is gone entirely");
+
+  const { out } = run(["init", "--hooks", "--remove", "--root", root]);
+  assert.match(out, /nothing to remove/, "removing twice is not an error");
+});
+
+test("a settings file that is not JSON is refused, never overwritten", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const sp = join(root, "settings.json");
+  writeFileSync(sp, "{ this is not json");
+
+  const { code, out } = run(["init", "--hooks", "--root", root], { expectFail: true });
+  assert.equal(code, 1);
+  assert.match(out, /not valid JSON/);
+  assert.equal(readFileSync(sp, "utf8"), "{ this is not json", "the file we could not read is the file we must not destroy");
 });
 
 test("doctor says whether the nudge hooks are actually wired up", (t) => {

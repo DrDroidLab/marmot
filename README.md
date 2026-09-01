@@ -68,11 +68,28 @@ Nothing is published to npm yet — npm installs straight from the repository, a
 there are no dependencies to fetch, so it takes a few seconds. `marmot` is then
 on your PATH for every terminal and every coding-agent session on the machine.
 
-> **Installing this with a coding agent?** Give it the two commands above. The
-> first puts `marmot` on the PATH; the second writes `SessionStart` and `Stop`
-> hooks into `~/.claude/settings.json` pointing at the installed copy. Both are
-> idempotent — re-running leaves an existing install alone unless you pass
-> `--force`, and hooks belonging to anything else are never touched.
+> **Installing this with a coding agent?** Give it both commands above. The
+> second one edits `~/.claude/settings.json`, so an agent may reasonably stop
+> and ask first. It is safe to run unattended, and here is exactly why:
+>
+> - It **appends two entries** — `SessionStart` and `Stop` — and changes nothing
+>   else in the file. Your statusline, permissions and other hooks are untouched.
+> - It **copies the file first** to `settings.json.marmot-backup` before writing.
+> - It is **idempotent**: run it twice and the second run reports there is
+>   nothing to do.
+> - It is **reversible in one command**: `marmot init --hooks --remove`, which
+>   takes out only Marmot's own entries.
+> - It **refuses rather than overwrites** if the file is not valid JSON.
+>
+> To see the change before making it: `marmot init --hooks --dry-run` prints
+> what it would do and writes nothing.
+
+Preview or undo it at any time:
+
+```bash
+marmot init --hooks --dry-run   # print what would change, write nothing
+marmot init --hooks --remove    # take Marmot's hooks back out
+```
 
 What the hooks give you:
 
