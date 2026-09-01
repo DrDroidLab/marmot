@@ -115,6 +115,7 @@ test("the readers agree on the fields the page and the report share", () => {
   assert.deepEqual(det.mcpCalls, agg.mcpCalls, "mcp calls");
   assert.deepEqual([...det.skills].sort(), [...agg.skills].sort(), "skills");
   assert.deepEqual(det.toolCalls, agg.toolCalls, "tool call counts");
+  assert.deepEqual(det.toolErrorsByName, agg.toolErrorsByName, "which tool failed");
 });
 
 test("a detail record can be judged by the rules, exactly as a session record is", async () => {

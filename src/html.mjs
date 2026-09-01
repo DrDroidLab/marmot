@@ -191,6 +191,14 @@ function showTip(e, html){ tip.innerHTML=html; tip.style.opacity="1";
   tip.style.left=x+"px"; tip.style.top=y+"px"; }
 function hideTip(){ tip.style.opacity="0"; }
 
+/** Every element carrying a tooltip, wherever it was rendered. */
+function bindTips(){
+  Array.prototype.forEach.call(view.querySelectorAll("[data-t]"),function(el){
+    el.onmousemove=function(e){ showTip(e,el.getAttribute("data-t")); };
+    el.onmouseleave=hideTip;
+  });
+}
+
 function kpi(k,v,n){ return '<div class="kpi"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'+(n?'<div class="n">'+esc(n)+'</div>':'')+'</div>'; }
 
 /* Part-to-whole across four token classes: a stacked bar, categorical hues in
@@ -271,34 +279,38 @@ function resetIn(iso){
  * One series over the window, as a stacked column per day. Answers what a total
  * cannot: whether a skill, server or model is a habit or a one-off.
  */
-function stackedByDay(title,cap,days,keys,pick){
+function stackedByDay(title,cap,days,keys,pick,fmt){
+  fmt=fmt||num;
   if(!days.length||!keys.length) return "";
   var max=0;
   days.forEach(function(d){ var t=0; keys.forEach(function(k){ t+=pick(d,k)||0; }); if(t>max) max=t; });
   if(!max) return "";
   var pal=["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--accent)","var(--warn)"];
   var cols=days.map(function(d){
-    var segs="",total=0;
+    var segs="",total=0,rows="";
     keys.forEach(function(k,i){
       var v=pick(d,k)||0; if(!v) return; total+=v;
       segs+='<i style="height:'+(v/max*100)+'%;background:'+pal[i%pal.length]+'"></i>';
+      if(keys.length>1) rows+='<div><i style="background:'+pal[i%pal.length]+'"></i>'+esc(k)+' <b>'+fmt(v)+'</b></div>';
     });
-    return '<div class="col" title="'+esc(d.day)+" \u00b7 "+num(total)+'">'+segs+'</div>';
+    if(!rows) rows='<div class="sub">nothing this day</div>';
+    return '<div class="col" data-t="'+esc('<b>'+d.day+'</b> · '+fmt(total)+rows)+'">'+segs+'</div>';
   }).join("");
-  var legend=keys.map(function(k,i){
+  var legend=keys.length>1?keys.map(function(k,i){
     return '<span><i style="background:'+pal[i%pal.length]+'"></i>'+esc(k)+'</span>';
-  }).join("");
+  }).join(""):"";
   return '<div class="panel"><h2>'+esc(title)+'</h2><p class="cap">'+esc(cap)+'</p>'
     +'<div class="byday">'+cols+'</div>'
     +'<div class="axis"><span>'+esc(days[0].day)+'</span><span>'+esc(days[days.length-1].day)+'</span></div>'
-    +'<div class="dlegend">'+legend+'</div></div>';
+    +(legend?'<div class="dlegend">'+legend+'</div>':"")+'</div>';
 }
 
 /** Per-day totals for skills, MCP servers and models, from the sessions. */
 function seriesByDay(){
   var byDay={};
   S.forEach(function(s){
-    var d=byDay[s.day]||(byDay[s.day]={day:s.day,skills:{},mcp:{},models:{}});
+    var d=byDay[s.day]||(byDay[s.day]={day:s.day,cost:0,skills:{},mcp:{},models:{}});
+    d.cost+=s.cost||0;
     var k;
     for(k in (s.skillCounts||{})) d.skills[k]=(d.skills[k]||0)+s.skillCounts[k];
     for(k in (s.mcpCounts||{})) d.mcp[k]=(d.mcp[k]||0)+s.mcpCounts[k];
@@ -331,8 +343,31 @@ function summaryPanels(){
       }).join("")+'</div></div>';
   }
 
+  var PL=Z.plan;
+  if(PL&&PL.limits&&PL.limits.length){
+    var live=PL.limits.filter(function(l){ return !l.expired && (l.active||l.resetsAt); });
+    if(live.length){
+      out+='<div class="panel"><h2>Plan limits</h2><p class="cap">How much of each window is gone'
+        +(PL.plan?" on "+esc(PL.plan):"")+'. This is what actually runs out; the dollars above are a shadow price.</p><div class="barlist">'
+        +live.map(function(l){
+          var cls=l.percent>=90?"var(--danger)":l.percent>=75?"var(--warn)":"var(--s3)";
+          var note=l.resetsAt?"resets "+resetIn(l.resetsAt):"";
+          return '<div class="barrow"><div class="lbl"><u style="width:'+l.percent+'%;background:'+cls+';opacity:.3"></u><s>'
+            +esc(l.label.charAt(0).toUpperCase()+l.label.slice(1))+'</s></div>'
+            +'<div class="ct">'+l.percent+'% <span class="sub">'+esc(note)+'</span></div></div>';
+        }).join("")+'</div>'
+        +(PL.spend&&PL.spend.enabled&&PL.spend.limit
+          ? '<div class="barlist" style="margin-top:8px"><div class="barrow"><div class="lbl"><u style="width:'
+            +Math.min(100,((PL.spend.used||0)/PL.spend.limit)*100)+'%"></u><s>Usage credits</s></div>'
+            +'<div class="ct">'+usd(PL.spend.used||0)+" of "+usd(PL.spend.limit)+' <span class="sub">real money</span></div></div></div>'
+          : "")
+        +'</div>';
+    }
+  }
+
   var days=seriesByDay();
-  out+=stackedByDay("Model tokens by day","Which model the window's tokens went to, day by day.",days,topKeys(days,"models",6),function(d,k){return d.models[k];});
+  out+=stackedByDay("Spend by day","Modelled at published rates, day by day across the window.",days,["spend"],function(d){return d.cost;},usd);
+  out+=stackedByDay("Model tokens by day","Which model the window's tokens went to, day by day.",days,topKeys(days,"models",6),function(d,k){return d.models[k];},tok);
   out+=stackedByDay("Skills by day","How often each skill loaded. A habit looks different from a one-off.",days,topKeys(days,"skills",6),function(d,k){return d.skills[k];});
   out+=stackedByDay("MCP calls by day","Calls per server. A server with no bar all window is one you pay for on every request and never use.",days,topKeys(days,"mcp",6),function(d,k){return d.mcp[k];});
 
@@ -378,6 +413,19 @@ function summaryPanels(){
         var note=r.size?(r.size.error?esc(r.size.error):r.size.count+" tools · ~"+tok(t)):"not measured";
         return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"'+(r.calls?"":' class="idlebar"')+'></u><s'+(r.calls?"":' class="idle"')+'>'+esc(r.name)+'</s></div>'
           +'<div class="ct">'+num(r.calls)+'× · '+note+(r.calls?"":' · <span class="idle">never called</span>')+'</div></div>';
+      }).join("")+'</div></div>';
+  }
+
+  var errs=M.toolErrorsByName||{}, errNames=Object.keys(errs);
+  if(errNames.length){
+    var rows=errNames.map(function(n){ return {name:n, errors:errs[n], calls:(M.toolCallsByName||{})[n]||errs[n]}; })
+      .sort(function(a,b){ return b.errors-a.errors || (b.errors/b.calls)-(a.errors/a.calls); }).slice(0,10);
+    var maxErr=rows[0].errors||1;
+    out+='<div class="panel"><h2>Tools failing</h2><p class="cap">Every failure is paid for twice — once to fail, once to retry. A tool failing every time is a wrong path or a missing permission, not bad luck.</p><div class="barlist">'
+      +rows.map(function(r){
+        var rate=r.errors/r.calls;
+        return '<div class="barrow"><div class="lbl"><u style="width:'+(r.errors/maxErr*100).toFixed(1)+'%;background:var(--danger);opacity:.28"></u><s'+(rate>=0.5?' class="idle"':'')+'>'+esc(r.name)+'</s></div>'
+          +'<div class="ct">'+num(r.errors)+" of "+num(r.calls)+" · "+pct(rate)+'</div></div>';
       }).join("")+'</div></div>';
   }
 
@@ -446,6 +494,7 @@ function renderIndex(){
   Array.prototype.forEach.call(view.querySelectorAll("tbody tr"),function(tr){
     tr.onclick=function(){ location.hash="s/"+tr.getAttribute("data-id"); };
   });
+  bindTips();
 }
 
 /* ---------------- detail ---------------- */
@@ -486,9 +535,8 @@ function renderDetail(s){
     b.onclick=function(){ var f=b.getAttribute("data-f"); show[f]=!show[f]; b.setAttribute("aria-pressed",String(show[f])); renderTimeline(s); };
   });
   document.getElementById("q").oninput=function(e){ show.q=e.target.value.toLowerCase(); renderTimeline(s); };
+  bindTips();
   Array.prototype.forEach.call(view.querySelectorAll(".spark i"),function(b){
-    b.onmousemove=function(e){ showTip(e,b.getAttribute("data-t")); };
-    b.onmouseleave=hideTip;
     b.onclick=function(){ var el=document.getElementById("e"+b.getAttribute("data-i")); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); };
   });
   renderTimeline(s);

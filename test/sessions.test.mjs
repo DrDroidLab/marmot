@@ -262,6 +262,40 @@ test("tool errors are counted and rated against total calls", (t) => {
   assert.equal(s.toolErrorRate, 0.3);
 });
 
+test("a failure is blamed on the tool that produced it", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  // "3% failed" does not tell you which one to fix; a tool failing every time
+  // is a wrong path or a missing permission, not bad luck.
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        prompt("go"),
+        response({
+          id: "m1",
+          u: usage({ output: 10 }),
+          tools: [toolUse("Bash", { command: "ok" }, "t1"), toolUse("Bash", { command: "bad" }, "t2"), toolUse("mcp__db__query", {}, "t3")],
+        }),
+        toolResult("t1"),
+        toolResult("t2", { isError: true }),
+        toolResult("t3", { isError: true }),
+      ],
+    }),
+  );
+  assert.equal(s.toolErrors, 2);
+  assert.deepEqual(s.toolErrorsByName, { Bash: 1, mcp__db__query: 1 });
+  assert.equal(s.toolCalls.Bash, 2, "and the call count is unaffected");
+});
+
+test("an error whose tool cannot be identified is still counted", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(root, writeSession(root, { entries: [toolResult("never-issued", { isError: true })] }));
+  assert.equal(s.toolErrors, 1);
+  assert.deepEqual(s.toolErrorsByName, {}, "blaming the wrong tool would be worse than not blaming one");
+});
+
 test("compactions are counted from either marker", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);

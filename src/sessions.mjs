@@ -76,6 +76,8 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
   // tool-heavy session. Usage is counted once per `message.id`; content blocks
   // are still counted per entry, because each entry carries a different one.
   const countedUsage = new Set();
+  // tool_use id → tool name, so an error can be attributed to what failed.
+  const toolNames = new Map();
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -119,6 +121,7 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
     toolCalls: {},
     totalToolCalls: 0,
     toolErrors: 0,
+    toolErrorsByName: {},
     skills: new Set(),
     mcpCalls: {},
     permissionModes: new Set(),
@@ -200,6 +203,9 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
     for (const b of msg.content ?? []) {
       if (!b || typeof b !== "object") continue;
       if (b.type === "tool_use") {
+        // Remembered so a failure arriving later can be blamed on the right
+        // tool: "3% failed" does not tell you which one to fix.
+        if (b.id) toolNames.set(b.id, b.name);
         s.toolCalls[b.name] = (s.toolCalls[b.name] ?? 0) + 1;
         s.totalToolCalls += 1;
         if (b.name === "Skill" && b.input?.skill) s.skills.add(b.input.skill);
@@ -208,7 +214,11 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
           if (server) s.mcpCalls[server] = (s.mcpCalls[server] ?? 0) + 1;
         }
       }
-      if (b.type === "tool_result" && b.is_error) s.toolErrors += 1;
+      if (b.type === "tool_result" && b.is_error) {
+        s.toolErrors += 1;
+        const name = toolNames.get(b.tool_use_id);
+        if (name) s.toolErrorsByName[name] = (s.toolErrorsByName[name] ?? 0) + 1;
+      }
     }
   }
 

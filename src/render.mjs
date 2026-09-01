@@ -38,7 +38,7 @@ function sparkline(values) {
 }
 
 export function totals(sessions) {
-  const t = { cost: 0, prompts: 0, turns: 0, sessions: sessions.length, toolCalls: 0, toolErrors: 0, tok: 0, cacheRead: 0, seen: 0, models: {}, modelTokens: {}, skills: {}, mcp: {}, baselines: [], promptCounts: [] };
+  const t = { cost: 0, prompts: 0, turns: 0, sessions: sessions.length, toolCalls: 0, toolErrors: 0, toolCallsByName: {}, toolErrorsByName: {}, tok: 0, cacheRead: 0, seen: 0, models: {}, modelTokens: {}, skills: {}, mcp: {}, baselines: [], promptCounts: [] };
   for (const s of sessions) {
     t.cost += s.cost;
     t.prompts += s.typedPrompts;
@@ -49,6 +49,8 @@ export function totals(sessions) {
     t.cacheRead += s.tokens.cacheRead;
     t.seen += s.tokens.cacheRead + s.tokens.cacheWrite + s.tokens.input;
     for (const [m, c] of Object.entries(s.models)) t.models[m] = (t.models[m] ?? 0) + c;
+    for (const [n, c] of Object.entries(s.toolCalls ?? {})) t.toolCallsByName[n] = (t.toolCallsByName[n] ?? 0) + c;
+    for (const [n, c] of Object.entries(s.toolErrorsByName ?? {})) t.toolErrorsByName[n] = (t.toolErrorsByName[n] ?? 0) + c;
     for (const [m, k] of Object.entries(s.modelTokens ?? {})) t.modelTokens[m] = (t.modelTokens[m] ?? 0) + (k.total ?? 0);
     for (const name of s.skills ?? []) t.skills[name] = (t.skills[name] ?? 0) + 1;
     for (const [srv, n] of Object.entries(s.mcpCalls ?? {})) t.mcp[srv] = (t.mcp[srv] ?? 0) + n;
@@ -192,6 +194,25 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
         dim(`  ${"".padEnd(w)}  ${num(total)} tokens on every request`) + (idle ? warn(`, ${num(idle)} of them idle`) : ""),
       );
     }
+  }
+
+  // Which tools are failing, not just how many calls did. A failure is paid for
+  // twice — once to fail, once to retry — and a tool failing every time is a
+  // wrong path or a missing permission, not bad luck.
+  const failing = Object.entries(t.toolErrorsByName)
+    .map(([name, errors]) => ({ name, errors, calls: t.toolCallsByName[name] ?? errors }))
+    .sort((a, b) => b.errors - a.errors || b.errors / b.calls - a.errors / a.calls)
+    .slice(0, 8);
+  if (failing.length) {
+    out.push("");
+    out.push(bold("  Tools failing"));
+    const w = Math.min(38, Math.max(...failing.map((f) => f.name.length)));
+    for (const f of failing) {
+      const rate = f.errors / f.calls;
+      const line = `  ${f.name.slice(0, w).padEnd(w)}  ${String(f.errors).padStart(4)} of ${String(num(f.calls)).padStart(6)}  ${pct(rate).padStart(4)}`;
+      out.push(rate >= 0.5 ? warn(line) : line);
+    }
+    out.push(dim("  Every failure is paid for twice — once to fail, once to retry."));
   }
 
   // Each working directory is its own setup — its own servers, its own skills,
