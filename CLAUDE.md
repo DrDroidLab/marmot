@@ -139,7 +139,16 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    through literally and became "your last NaN days". `posInt()` in the CLI now
    guards this, but don't reintroduce the pattern.
 
-4. **`claude plugin install` has no `--force`.** To pick up changes:
+4. **A slash command in a session whose plugin was just removed prints nothing
+   at all.** `${CLAUDE_PLUGIN_ROOT}` empties, the command becomes
+   `node "/bin/marmot.mjs"`, node writes *Cannot find module* to stderr, and the
+   slash command surfaces an empty result — it reads as "the report is broken"
+   rather than "the plugin is gone". Plugin state only reloads at startup, so
+   **restart after any install, uninstall or marketplace change** before judging
+   anything. `claude plugin list` also keeps reporting the old state until then,
+   including `✔ enabled` for a plugin you have just uninstalled.
+
+5. **`claude plugin install` has no `--force`.** To pick up changes:
    ```bash
    claude plugin marketplace update marmot
    claude plugin uninstall marmot && claude plugin install marmot@marmot
