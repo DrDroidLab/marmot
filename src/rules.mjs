@@ -12,7 +12,7 @@
 
 import { configuredServers, byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins } from "./format.mjs";
-import { paysPerToken } from "./plan.mjs";
+import { paysPerToken, usableLimits } from "./plan.mjs";
 
 const premiumCost = (s, cfg) =>
   Object.entries(s.models)
@@ -268,7 +268,9 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
   // bites — you have already paid the money, and what runs out is allowance.
   if (cfg.limits?.enabled && plan?.limits?.length) {
     const steps = limitSteps(cfg, plan.plan);
-    for (const l of plan.limits) {
+    // Only windows that are still the window they were measured in. A reading
+    // whose window has reset says nothing about the one you are in now.
+    for (const l of usableLimits(plan)) {
       // The highest mark this window has passed. Each speaks once, so 91% says
       // "90%" rather than repeating what 76% already said.
       const crossed = steps.filter((n) => l.percent >= n).sort((a, b) => b - a)[0];

@@ -55,6 +55,9 @@ export const DEFAULTS = {
     // Marks on the way to a limit, as a percentage of it. Crossing each one
     // speaks once, so you hear "half gone" long before "nearly out" — a single
     // cap can only ever tell you the second.
+    //
+    // The windows are Claude's own: a rolling 5-hour session window, a weekly
+    // one, and a weekly one scoped to a single model. There is no daily limit.
     steps: [50, 75, 90],
     // Per plan, because the same percentage means a different amount of room.
     // An empty array silences a plan; API usage has no limit to run out of.

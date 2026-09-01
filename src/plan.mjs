@@ -51,8 +51,14 @@ export const paysPerToken = (plan) => plan === "API";
 
 const asPercent = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+/** True once the window a reading described has rolled over. */
+const expired = (resetsAt, now) => {
+  const t = Date.parse(resetsAt ?? "");
+  return Number.isFinite(t) ? t <= now : false;
+};
+
 /** The limits worth showing, newest snapshot first. */
-function readLimits(u) {
+function readLimits(u, now) {
   const out = [];
   const seen = new Set();
 
@@ -70,6 +76,10 @@ function readLimits(u) {
       severity: l.severity ?? "normal",
       resetsAt: l.resets_at ?? null,
       active: Boolean(l.is_active),
+      // The window this figure described has already rolled over, so the
+      // number is not stale — it is dead. Reporting it as current would be
+      // saying "you are fine" about a window nobody has measured.
+      expired: expired(l.resets_at, now),
     });
   }
   if (out.length) return out;
@@ -78,7 +88,7 @@ function readLimits(u) {
   for (const [key, label] of [["five_hour", "5-hour session"], ["seven_day", "weekly"]]) {
     const pct = asPercent(u?.[key]?.utilization);
     if (pct === null) continue;
-    out.push({ kind: key, label, percent: pct, severity: "normal", resetsAt: u[key].resets_at ?? null, active: true });
+    out.push({ kind: key, label, percent: pct, severity: "normal", resetsAt: u[key].resets_at ?? null, active: true, expired: expired(u[key].resets_at, now) });
   }
   return out;
 }
@@ -125,7 +135,7 @@ export function readPlan(root, { now = Date.now(), env = process.env } = {}) {
 
   return {
     plan,
-    limits: readLimits(cached?.utilization),
+    limits: readLimits(cached?.utilization, now),
     spend: readSpend(cached?.utilization),
     fetchedAt,
     ageMins,
@@ -135,6 +145,18 @@ export function readPlan(root, { now = Date.now(), env = process.env } = {}) {
     path,
   };
 }
+
+/**
+ * The limits worth acting on: ones whose window is still the window they were
+ * measured in. Everything else tells you about a window that has since reset.
+ */
+export const usableLimits = (plan) =>
+  // A reading with no reset time and no active flag cannot be checked for
+  // freshness at all, so it is not something to act on either.
+  (plan?.limits ?? []).filter((l) => !l.expired && (l.active || l.resetsAt));
+
+/** True when we hold readings, but none of them still describe a live window. */
+export const limitsExpired = (plan) => Boolean(plan?.limits?.length) && usableLimits(plan).length === 0;
 
 /** The single limit closest to being reached, which is the one worth saying. */
 export function tightestLimit(limits = []) {

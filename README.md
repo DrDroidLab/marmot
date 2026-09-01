@@ -122,10 +122,25 @@ real limit utilisation from what Claude Code caches, and reports both:
 On pay-as-you-go the same figure is the real price, and it is labelled
 **Spend** rather than *Modelled spend* — there the dollars are the point.
 
+**The windows Claude plans actually use** — there is no daily one:
+
+| Window | What it is |
+|---|---|
+| **5-hour session** | A rolling window, the one you hit mid-afternoon. Refills on its own. |
+| **Weekly** | Seven days, across everything. |
+| **Weekly, per model** | A second seven-day window scoped to one model, shown only when it is in use. |
+| **Usage credits** | Real money beyond the plan, if you have them enabled. A monthly cap in dollars, and the one figure here that is an actual bill. |
+
 The percentages come from the snapshot Claude Code caches, so they are as fresh
-as the last time it asked; anything over an hour old is shown with its age
-attached rather than as current. Subscription plans return no dollar value for
-a limit, which is exactly why percent is the unit.
+as the last time it asked. Two things follow, and the report says both out
+loud: anything over an hour old is shown with its age attached, and a reading
+whose window has **already reset** is shown as `—` rather than as a
+comfortable-looking number, because "5% used" about a window that no longer
+exists reads as *plenty left* when the truth is *nobody has measured*. Run
+`/usage` in Claude Code to refresh it.
+
+Subscription plans return no dollar value for a limit, which is exactly why
+percent is the unit.
 
 **Baseline context** is what every request carries before you type — system
 prompt, skill descriptions, every attached tool definition — and it is what

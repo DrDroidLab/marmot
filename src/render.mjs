@@ -112,7 +112,13 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
   // On a subscription this is the figure that actually bites: the money is
   // already spent, and what runs out is allowance.
   for (const l of plan?.limits ?? []) {
-    if (!l.active && l.percent === 0) continue;
+    if (!l.active && l.percent === 0 && !l.resetsAt) continue;
+    if (l.expired) {
+      // Showing 5% here would read as "plenty left" about a window that has
+      // since reset and nobody has measured.
+      rows.push([`${cap1(l.label)} limit`, "—", `that window reset ${mins(-((Date.parse(l.resetsAt) - Date.now()) / 60_000))} ago · run /usage in Claude Code to refresh`]);
+      continue;
+    }
     const note = [
       l.resetsAt ? `resets ${resetIn(l.resetsAt)}` : null,
       plan.ageMins !== null && plan.ageMins > 60 ? `as of ${mins(plan.ageMins)} ago` : null,
