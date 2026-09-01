@@ -83,6 +83,7 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
     compactions: 0,
     toolCounts: {},
     toolErrors: 0,
+    toolErrorsByName: {},
     skillCounts: {},
     mcpCounts: {},
     models: {},
@@ -174,7 +175,10 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
       if (skill) s.skillCounts[skill] = (s.skillCounts[skill] ?? 0) + 1;
       if (server) s.mcpCounts[server] = (s.mcpCounts[server] ?? 0) + 1;
       const isError = b.id ? errored.has(b.id) : false;
-      if (isError) s.toolErrors += 1;
+      if (isError) {
+        s.toolErrors += 1;
+        s.toolErrorsByName[b.name] = (s.toolErrorsByName[b.name] ?? 0) + 1;
+      }
       tools.push({ name: b.name, server, skill, isError, ...clip(summariseTool(b.name, b.input), caps.tool) });
     }
     const body = textOf(msg.content);

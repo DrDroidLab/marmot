@@ -185,6 +185,11 @@ Marmot prints the window every figure came from:
   claude-opus-5      $4,092     98% · 5.7B tokens
   claude-sonnet-5    $92        2% · 104M tokens
 
+  Tools failing
+  Bash                        126 of  4,933    3%
+  mcp__supabase__execute_sql    3 of      3  100%
+  Every failure is paid for twice — once to fail, once to retry.
+
   Skills
   dataviz            6×         ~4.1K tokens to load
 
@@ -320,7 +325,7 @@ on your PATH for every terminal and every coding-agent session on the machine.
 > To see the change before making it: `marmot init --hooks --dry-run` prints
 > what it would do and writes nothing.
 
-Preview or undo it at any time:
+It opens on **the same figures as the report** — spend, tokens, cache, baseline context, your plan's live limit percentages, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. Spend, model tokens, skills and MCP calls each get a stacked column per day across the window — hover any column for the breakdown — which answers what a total cannot: whether something is a habit or a one-off, and which server has no bar at all. Your plan's limits get a gauge each, and the tools that are failing get named rather than left inside a "3% failed" summary. From there each session opens onto its full timeline — every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle — which is how you find the turn where a session started getting expensive.
 
 ```bash
 marmot init --hooks --dry-run   # print what would change, write nothing
