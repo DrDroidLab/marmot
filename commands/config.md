@@ -15,7 +15,12 @@ above, and it is open in front of them.
 Every threshold that decides when a nudge fires lives in this file. The ones
 users most often want:
 
-- `session.costCap` / `daily.costCap` — the dollar caps.
+- `limits.steps` — the marks on the way to your plan's limits, `[50, 75, 90]`
+  by default, per plan under `limits.byPlan`. On a subscription these are the
+  real ceiling.
+- `session.costCap` / `daily.costCap` — dollar caps, which only fire on
+  pay-as-you-go. On a subscription the money is already spent, so they are
+  skipped rather than firing every day about a bill nobody sends.
 - `session.turnCap` — prompts in one session before it is worth a word.
 - `live` — which rules may interrupt mid-session. Everything not listed here
   waits for the daily digest.

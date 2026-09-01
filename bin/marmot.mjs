@@ -205,8 +205,8 @@ if (cmd === "mcp-audit") {
 }
 
 /**
- * The browser page. Reachable as `marmot browse`, and as `--browse` on the
- * report, which is what the single /marmot:usage slash command passes through.
+ * The browser page. Reachable as `marmot browse`, and built by the report
+ * itself unless `--no-browse` says otherwise.
  * Returns false when there was nothing to render; the caller decides whether
  * that is an error.
  */
@@ -489,8 +489,8 @@ const SKILL_SIZES = DEMO
 const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : (await import("../src/sessions.mjs")).configuredServers(ROOT, process.cwd());
 process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN, attribution: ATTRIBUTION }));
 
-// `--sessions` and `--browse` are what make one command enough: the numbers,
-// every session behind them, and the full page when you want to dig in.
+// `--sessions` adds every session under the report; the page follows unless
+// `--no-browse`. One command, the numbers and somewhere to dig in.
 if (has("sessions")) process.stdout.write(`\n${renderSessionList(sessions, { heading: true })}\n\n`);
 
 // The page is the better place to read all of this, so it is built and opened
