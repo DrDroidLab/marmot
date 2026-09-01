@@ -44,6 +44,21 @@ export function totals(sessions) {
   return t;
 }
 
+/**
+ * One line per session, newest first. Used by `marmot sessions` and folded into
+ * the report by `--sessions`, so the two can never drift apart.
+ */
+export function renderSessionList(sessions, { heading = false } = {}) {
+  const out = [];
+  if (heading) out.push(bold(`  Sessions · ${sessions.length}`), "");
+  for (const s of sessions) {
+    out.push(
+      `  ${s.day}  ${usd(s.cost).padStart(9)}  ${String(s.typedPrompts).padStart(4)} prompts  ${String(s.assistantTurns).padStart(5)} turns  ${dim(s.cwd ?? "")}`,
+    );
+  }
+  return out.join("\n");
+}
+
 export function renderReport(sessions, cfg, { days, nudges, demo = false }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"

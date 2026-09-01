@@ -82,6 +82,7 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/detail.mjs` | Per-turn reader for the browser: the event timeline. |
 | `src/pricing.mjs` | Published rates, cache multipliers, fast mode. |
 | `src/rules.mjs` | The nudge rules. Pure functions, no I/O beyond MCP config. |
+| `src/notify.mjs` | Bell + desktop notification. Never throws; `MARMOT_NO_NOTIFY` mutes it. |
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
 | `src/render.mjs` | Terminal output. |
@@ -152,7 +153,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 157 tests, node:test, no dependencies
+npm test        # 174 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:
@@ -166,6 +167,7 @@ The suite encodes the drill that used to be manual, so most of it is covered:
 | `test/rules.test.mjs` | Every rule's three guards; quiet on an ordinary session. |
 | `test/cli.test.mjs` | Every command runs; `--no-text` redacts; the page is self-contained. |
 | `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them. |
+| `test/notify.test.mjs` | Alert decisions, without firing a real popup or bell. |
 
 `test/helpers.mjs` builds fixtures in the real transcript shape — note that
 `response()` deliberately fans one API response out across several JSONL

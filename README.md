@@ -73,17 +73,22 @@ The `▲` appears once you're past your own caps.
 
 | Command | Slash command | What it does |
 |---|---|---|
-| `marmot` | `/marmot:usage` | The report — spend, sessions, models, nudges |
-| `marmot browse` | `/marmot:sessions` | Build the session browser page and open it |
+| `marmot` | `/marmot:usage` | The report — spend, trends, every session, nudges |
 | `marmot config` | `/marmot:config` | Open the thresholds file |
+| `marmot browse` | | Build the session browser page and open it |
 | `marmot nudges` | | Only what's worth knowing |
 | `marmot sessions` | | One line per session |
 | `marmot doctor` | | What's readable on this machine, and what isn't |
 | `marmot init` | | Write the thresholds file |
 
+`/marmot:usage` is the one command to reach for: it prints the report with every
+session listed, and `--browse` opens the full page from there.
+
 | Flag | |
 |---|---|
 | `--days N` | Window, default 30 |
+| `--sessions` | Add the per-session list to the report |
+| `--browse` | Also build and open the session browser page |
 | `--demo` | Synthetic data, safe for screenshots |
 | `--json` | Machine-readable |
 | `--root DIR` | Claude Code home, default `~/.claude` |
@@ -120,11 +125,12 @@ or `/marmot:config` inside Claude Code.
 | `tool-errors` | Failed tool calls | > 10% over ≥ 20 calls |
 | `mcp-idle` | Servers configured and never invoked | any |
 
-Three other keys are worth knowing:
+Four other keys are worth knowing:
 
 - **`live`** — which rules may interrupt you mid-session. Everything else waits for the daily digest.
 - **`rateOverrides`** — set these if you're on negotiated rates and want the modelled cost to match your contract.
 - **`digest.cadence`** — set to `"off"` to stop the daily digest.
+- **`notify`** — `{ "desktop": true, "bell": true }`. A nudge rings the terminal bell and raises a desktop notification, so it lands while you can still act on it. Turn either off here. `MARMOT_NO_NOTIFY=1` silences both, and CI is silent automatically.
 
 If a rule fires on nearly every session, raise its cap rather than removing it. Every rule carries three guards — a ratio gap, a minimum sample and a dollar floor — because a nudge that always fires gets muted, and then none of them work.
 
@@ -157,7 +163,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 157 tests, no dependencies, ~2s
+npm test        # 174 tests, no dependencies, ~2s
 ```
 
 ## License

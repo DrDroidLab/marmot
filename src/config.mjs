@@ -54,6 +54,10 @@ export const DEFAULTS = {
     lightWorkFilePatterns: ["^test_", "_test\\.[a-z]+$", "\\.(test|spec)\\.[a-z]+$"],
   },
 
+  // How a nudge reaches you, beyond the line in the transcript. Both on to
+  // start with; a nudge you scroll past is a nudge that did not happen.
+  notify: { desktop: true, bell: true },
+
   cache: { minHitRate: 0.7, minTurns: 20 },
   toolErrors: { maxRate: 0.1, minCalls: 20 },
   mcp: { enabled: true },

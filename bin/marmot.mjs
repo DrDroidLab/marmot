@@ -15,7 +15,7 @@
 import { loadSessions, defaultRoot } from "../src/sessions.mjs";
 import { loadConfig, DEFAULTS, configPath } from "../src/config.mjs";
 import { evaluate } from "../src/rules.mjs";
-import { renderReport, renderNudges, totals } from "../src/render.mjs";
+import { renderReport, renderNudges, renderSessionList, totals } from "../src/render.mjs";
 import { usd, num, dim, bold } from "../src/format.mjs";
 import { writeFileSync, existsSync, readFileSync, statSync } from "node:fs";
 
@@ -130,7 +130,13 @@ if (cmd === "config") {
   process.exit(0);
 }
 
-if (cmd === "browse") {
+/**
+ * The browser page. Reachable as `marmot browse`, and as `--browse` on the
+ * report, which is what the single /marmot:usage slash command passes through.
+ * Returns false when there was nothing to render; the caller decides whether
+ * that is an error.
+ */
+async function runBrowse() {
   const { readSessionDetail } = await import("../src/detail.mjs");
   const { buildHtml } = await import("../src/html.mjs");
   const { sessionFiles } = await import("../src/sessions.mjs");
@@ -149,7 +155,7 @@ if (cmd === "browse") {
       const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
       execFile(opener, [out], () => {});
     }
-    process.exit(0);
+    return true;
   }
 
   const only = flag("session", null);
@@ -175,7 +181,7 @@ if (cmd === "browse") {
 
   if (!picked.length) {
     process.stderr.write(only ? `No session matching ${only}.\n` : `No sessions under ${ROOT}/projects in the last ${DAYS} days.\n`);
-    process.exit(1);
+    return false;
   }
 
   const detailed = [];
@@ -199,7 +205,11 @@ if (cmd === "browse") {
     const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
     execFile(opener, [out], () => {});
   }
-  process.exit(0);
+  return true;
+}
+
+if (cmd === "browse") {
+  process.exit((await runBrowse()) ? 0 : 1);
 }
 
 const sessions = has("demo")
@@ -275,14 +285,18 @@ if (cmd === "nudges") {
 }
 
 if (cmd === "sessions") {
-  process.stdout.write("\n");
-  for (const s of sessions) {
-    process.stdout.write(
-      `  ${s.day}  ${usd(s.cost).padStart(9)}  ${String(s.typedPrompts).padStart(4)} prompts  ${String(s.assistantTurns).padStart(5)} turns  ${dim(s.cwd ?? "")}\n`,
-    );
-  }
-  process.stdout.write("\n");
+  process.stdout.write(`\n${renderSessionList(sessions)}\n\n`);
   process.exit(0);
 }
 
 process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO }));
+
+// `--sessions` and `--browse` are what make one command enough: the numbers,
+// every session behind them, and the full page when you want to dig in.
+if (has("sessions")) process.stdout.write(`\n${renderSessionList(sessions, { heading: true })}\n\n`);
+if (has("browse")) {
+  process.stdout.write("\n");
+  await runBrowse();
+} else if (has("sessions")) {
+  process.stdout.write(dim("  --browse opens the full page: every prompt, reply and tool call.\n\n"));
+}

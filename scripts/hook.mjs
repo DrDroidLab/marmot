@@ -25,6 +25,7 @@ import { evaluate, sessionRules, windowRules } from "../src/rules.mjs";
 import { renderNudges } from "../src/render.mjs";
 import { readState, writeState, shouldFire, markFired } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
+import { alert } from "../src/notify.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
 
@@ -71,6 +72,7 @@ if (event === "SessionStart") {
   const body = renderNudges(nudges, { compact: true });
   state.digestShownOn = today;
   writeState(state, root);
+  if (body.trim()) alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, "") });
   emit(event, body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`);
 }
 
@@ -124,6 +126,11 @@ if (live.has("daily-cost") || live.has("daily-baseline")) {
 
 writeState(state, root);
 if (!lines.length) process.exit(0);
+
+alert(cfg, {
+  title: `Marmot · ${lines[0].label}`,
+  body: lines.length > 1 ? `${lines[0].detail} (+${lines.length - 1} more)` : lines[0].detail,
+});
 
 emit(
   event,

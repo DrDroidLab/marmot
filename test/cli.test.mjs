@@ -166,6 +166,39 @@ test("the file config writes is one loadConfig accepts", async (t) => {
   assert.deepEqual(cfg.live, ["session-cost", "daily-cost", "daily-baseline", "session-turns"]);
 });
 
+test("report --sessions folds the per-session list into the report", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const plain = run(["report", "--days", "7", "--root", root]).out;
+  const withList = run(["report", "--days", "7", "--sessions", "--root", root]).out;
+
+  assert.ok(!plain.includes("Sessions ·"), "the list is opt-in");
+  assert.match(withList, /Sessions · 1/);
+  assert.match(withList, /2 prompts/, "a session line carries the prompt count");
+  assert.match(withList, /--browse/, "and points at the page for more");
+  // The report itself is still all there.
+  assert.match(withList, /Prompts you typed/);
+});
+
+test("report --browse prints the report and writes the page", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const out = join(root, "page.html");
+  const { out: stdout } = run(["report", "--days", "7", "--sessions", "--browse", "--no-open", "--out", out, "--root", root]);
+  assert.match(stdout, /Prompts you typed/, "the report still prints");
+  assert.match(stdout, /Sessions · 1/);
+  assert.match(stdout, /Wrote /, "and the page was written");
+  assert.ok(readFileSync(out, "utf8").includes("sess-aaaa1111"));
+});
+
+test("marmot sessions and report --sessions render the same lines", (t) => {
+  const { root, cleanup } = populatedRoot();
+  t.after(cleanup);
+  const standalone = run(["sessions", "--days", "7", "--root", root]).out.trim();
+  const folded = run(["report", "--days", "7", "--sessions", "--root", root]).out;
+  assert.ok(folded.includes(standalone), "one renderer, so the two cannot drift");
+});
+
 /* ── the browser page ──────────────────────────────────────────────────── */
 
 const buildPage = (root, extra = []) => {

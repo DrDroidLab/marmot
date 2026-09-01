@@ -18,7 +18,7 @@ const fire = (root, input) => {
   const out = execFileSync(process.execPath, [HOOK], {
     input: JSON.stringify(input),
     encoding: "utf8",
-    env: { ...process.env, MARMOT_ROOT: root, NO_COLOR: "1" },
+    env: { ...process.env, MARMOT_ROOT: root, NO_COLOR: "1", MARMOT_NO_NOTIFY: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   return out.trim() ? JSON.parse(out) : null;
@@ -102,7 +102,7 @@ test("malformed hook input exits cleanly", () => {
   const out = execFileSync(process.execPath, [HOOK], {
     input: "not json",
     encoding: "utf8",
-    env: { ...process.env, MARMOT_ROOT: root },
+    env: { ...process.env, MARMOT_ROOT: root, MARMOT_NO_NOTIFY: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   assert.equal(out.trim(), "");
