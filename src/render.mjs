@@ -10,7 +10,9 @@ export function wrap(text, width = 76, indent = "  ") {
   let line = "";
   for (const w of words) {
     if ((line + " " + w).trim().length > width) {
-      lines.push(line.trim());
+      // A word longer than the width starts the first line rather than pushing
+      // an empty one before it — a long path in a nudge should not print a gap.
+      if (line.trim()) lines.push(line.trim());
       line = w;
     } else line += ` ${w}`;
   }

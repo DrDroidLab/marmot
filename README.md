@@ -1,29 +1,29 @@
 # Marmot
 
-**Your own Claude Code token consumption — read from the session records already on your machine.**
+**Your own Claude Code token consumption, read from the session records already on your machine.**
 
-No account. No API key. No server. Nothing is uploaded.
+Claude Code writes every session to `~/.claude/projects/<slug>/<session-id>.jsonl` as it runs. Marmot reads those files and tells you what your sessions cost, where the turns went, and when something is worth a second look.
 
-A marmot sits on its own patch of ground and whistles when something's off. That's the whole product: it watches your sessions, locally, and tells you when a number is worth a look.
+It's one command, zero dependencies, and it runs entirely on your own machine.
 
 ```bash
-npx @drdroidlab/marmot --demo      # see it on synthetic data first
-npx @drdroidlab/marmot             # then on your own
+npx @drdroidlab/marmot --demo      # synthetic data, to see the shape of it
+npx @drdroidlab/marmot             # your own, last 30 days
 ```
 
-Works on **Pro, Max and Team** plans — where none of the organisation APIs exist.
+Works on **Pro, Max and Team** plans.
+
+A marmot sits on its own patch of ground and whistles when something's off. That's the whole product.
 
 ![The session browser](docs/browse-index.png)
 
 ---
 
-## Why this exists
+## What it reads
 
-Every dashboard for AI coding spend is built for someone managing a team. If you just want to see your own habits, the options are an enterprise API you can't get a key for, or nothing.
+Everything Marmot needs is already on your disk. Each transcript carries per-turn token counts by type, the model, git branch, working directory, tool calls and errors, skills, MCP invocations, permission mode, and the files that changed.
 
-But Claude Code already writes everything you'd need, to your own disk. Each session appends to `~/.claude/projects/<slug>/<session-id>.jsonl` as it runs, and that file carries **more than the Compliance API returns to an Enterprise org**: exact per-turn token counts by type, the model, git branch, working directory, tool calls and errors, skills, MCP invocations, permission mode, and the files that changed.
-
-Marmot reads those files. That's it. It never reads prompt or response text for the report — only counts, identifiers and tool names.
+That's the entire input. The report is built from counts, identifiers and tool names — it never reads your prompt or response text.
 
 ## What you get
 
@@ -44,6 +44,8 @@ Marmot reads those files. That's it. It never reads prompt or response text for 
   Daily              ▃▂▄▁▃█▆▃▂▁▄▁▂▆▁▅▄▅  peak $671 · median $233
 ```
 
+That spend figure is a **shadow price** — what these tokens would have cost at published API rates. On a subscription plan it is not an invoice line. It's the right number for comparing your own sessions to each other, and only that.
+
 ### Nudges, on deterministic rules
 
 No model decides whether to nudge you. Thresholds live in `~/.claude/marmot.json`.
@@ -59,7 +61,7 @@ No model decides whether to nudge you. Thresholds live in `~/.claude/marmot.json
 | `tool-errors` | Failed tool calls | > 10% over ≥ 20 calls |
 | `mcp-idle` | Servers configured and never invoked | any |
 
-Every rule carries three guards — a **ratio gap**, a **minimum sample** and a **dollar floor**. Without all three the same checks fire on nearly every session and the whole thing gets muted inside a week.
+Every rule carries three guards — a **ratio gap**, a **minimum sample** and a **dollar floor**. Tuned that way, they stay quiet on an ordinary day, which is the only way they stay useful.
 
 ### A session browser
 
@@ -67,7 +69,7 @@ Every rule carries three guards — a **ratio gap**, a **minimum sample** and a 
 npx @drdroidlab/marmot browse
 ```
 
-One self-contained HTML file, written locally and opened in your browser. No CDN, no network, no fonts — it works offline. Stat tiles, a clickable cost-per-turn timeline, the token split, tool/skill/MCP breakdowns, and the full chronological timeline of every prompt, reply and tool call with a text filter and an errors-only toggle.
+One self-contained HTML file, written locally and opened in your browser. No CDN, no network, no web fonts — it works offline. Stat tiles, a clickable cost-per-turn timeline, the token split, tool/skill/MCP breakdowns, and the full chronological timeline of every prompt, reply and tool call, with a text filter and an errors-only toggle.
 
 ![A single session](docs/browse-session.png)
 
@@ -124,32 +126,38 @@ marmot init                 # write the threshold file
 marmot report --json        # everything, machine-readable
 ```
 
-## About the dollar figures
+## How the numbers are counted
 
-**Cost is a shadow price.** On a subscription plan it is what these tokens *would have* cost at published API rates — not an invoice line, not a bill, not something to take to finance. It is the right number for comparing your own sessions to each other, and only that.
+The transcript format is internal and undocumented, and two details in it are easy to read wrong:
 
-Two things Marmot gets right that a naive reading of these files does not:
-
-- **Cache writes are priced at their actual TTL** — 2× at one hour, 1.25× at five minutes. Claude Code writes 1h entries, so treating every write as 1.25× understates a heavy session by around a fifth. The transcripts break this out; Marmot reads it.
+- **Cache writes are priced at their actual TTL** — 2× at one hour, 1.25× at five minutes. Claude Code writes 1h entries, so pricing every write at 1.25× understates a heavy session by about a fifth. The transcripts break this out, and Marmot reads it.
 - **Usage is counted once per API response.** Claude Code writes one JSONL entry per content block — a thinking block, the text, then each tool call — and every one of those entries repeats the same `usage` object. Summing per entry inflates cost and turn counts by roughly **1.9× on a tool-heavy session**. Marmot dedupes by `message.id`.
 
-A "turn" means **a prompt you typed**. Tool results come back as user entries in the transcript too, so counting every user entry inflates a 57-prompt session to 1,191.
+And a "turn" means **a prompt you typed**. Tool results arrive as user entries too, so counting every user entry reads a 57-prompt session as 1,191.
 
 ## Privacy
 
-Everything runs on your machine and nothing is uploaded — there is no server to upload to.
+Everything runs locally. Nothing is uploaded, and there's no service to upload it to — no account, no API key, no server.
 
-The **report** never reads prompt or response text. The **browser page** does, because that's the point of it; it is a local file, and it inherits the sensitivity of the transcript it came from. `marmot browse --no-text` leaves the text out entirely if you want to share the page.
+The **report** never reads prompt or response text. The **browser page** does, because that's the point of it; it's a local file, and it inherits the sensitivity of the transcript it came from. `marmot browse --no-text` leaves the text out if you want to share the page.
 
-Tool *results* are never stored anywhere by Marmot. In a real session they're around 95% of the bytes on disk — 40MB of one 42MB transcript — and dropping them is what turns a 41MB transcript into a 1MB page.
+Tool *results* are never stored. In a real session they're around 95% of the bytes on disk — 40MB of one 42MB transcript — and dropping them is what turns a 41MB transcript into a 1MB page.
 
-## Limits
+## Scope
+
+Marmot covers one developer on one machine, and stays small on purpose.
 
 - **One machine.** A team needs a collector, or Claude Code's OpenTelemetry exporter.
 - **Claude Code only.** Cursor stores per-message token counts locally but no model identity or cost, so it can't be priced. Copilot's local chat sessions carry no tokens, model or cost at all.
 - **Lines added and removed** need the diff or git history; the transcript names paths only.
 - **Agent-active versus your own time** isn't in these files. OTel has the split.
-- The transcript format is **internal and undocumented**. Every field access here is defensive: a renamed field should cost you a metric, not the report.
+- The transcript format is internal, so every field access is defensive: a renamed field costs you a metric, not the report. `marmot doctor` shows what's readable here.
+
+## Development
+
+```bash
+npm test        # 153 tests, no dependencies, ~2s
+```
 
 ## Requirements
 

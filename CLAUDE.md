@@ -90,10 +90,14 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `bin/marmot.mjs` | CLI entry and command dispatch. |
 | `scripts/hook.mjs` | SessionStart digest + Stop live nudges. |
 | `scripts/statusline.mjs` | The statusline. Incremental file reads. |
+| `test/` | `node:test` suite. `npm test`. |
 
 Two readers exist on purpose: `sessions.mjs` answers *what did this cost*,
-`detail.mjs` answers *what happened*. They duplicate a little usage-accounting
-logic — if you change how cost is computed, change both and re-verify they agree.
+`detail.mjs` answers *what happened*. `isTypedPrompt()` is shared between them —
+it lives in `sessions.mjs` and `detail.mjs` imports it, because when the rule was
+restated in both they drifted, and the page counted a legacy transcript's tool
+results as prompts. The usage accounting is still duplicated: if you change how
+cost is computed, change both. `test/agreement.test.mjs` fails when they diverge.
 
 ## Adding a rule
 
@@ -146,28 +150,37 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 
 ## Verifying a change
 
-There is no test suite yet. Until there is, this is the drill:
+```bash
+npm test        # 153 tests, node:test, no dependencies
+```
+
+The suite encodes the drill that used to be manual, so most of it is covered:
+
+| File | What it pins down |
+|---|---|
+| `test/pricing.test.mjs` | Prefix matching, fast mode, the three cache multipliers. |
+| `test/sessions.test.mjs` | All three invariants above, plus defensive parsing. |
+| `test/detail.test.mjs` | Turn merging, tool-result bodies never stored, clipping. |
+| `test/agreement.test.mjs` | **The two readers agree** — cost, turns, tokens, prompts. |
+| `test/rules.test.mjs` | Every rule's three guards; quiet on an ordinary session. |
+| `test/cli.test.mjs` | Every command runs; `--no-text` redacts; the page is self-contained. |
+| `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them. |
+
+`test/helpers.mjs` builds fixtures in the real transcript shape — note that
+`response()` deliberately fans one API response out across several JSONL
+entries, because a one-entry-per-response fixture cannot catch the 1.9x
+over-count.
+
+Two things the suite does not cover, still worth doing by hand:
 
 ```bash
-# 1. every command still runs
-for c in "report --days 7" "nudges --days 7" "sessions --days 2" doctor help; do
-  node bin/marmot.mjs $c >/dev/null || echo "FAIL: $c"
-done
-
-# 2. the two readers agree on the same session
-#    (cost, turns and tool calls must match exactly)
-
-# 3. --no-text really redacts
-node bin/marmot.mjs browse --days 7 --limit 3 --no-text --no-open --out /tmp/r.html
-#    then assert zero characters of prompt/assistant text in the embedded payload
-
-# 4. the page is valid and self-contained
-#    extract the inline <script> and `node --check` it; confirm no external URLs
-
-# 5. the hook actually fires, end to end
+# the hook fires end to end against the real binary
 rm -f ~/.claude/marmot-state.json
 cd /tmp && claude -p "say ok" --max-turns 1 >/dev/null
 [ -f ~/.claude/marmot-state.json ] && echo fired || echo "NOT FIRING"
+
+# the report looks right against your own data
+node bin/marmot.mjs report --days 7
 ```
 
 For the page, render it and *look* at it — a screenshot has caught bugs that

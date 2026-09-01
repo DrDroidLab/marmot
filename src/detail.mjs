@@ -14,6 +14,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { turnCost } from "./pricing.mjs";
+import { isTypedPrompt } from "./sessions.mjs";
 
 const CAP = { prompt: 6000, assistant: 3000, tool: 300 };
 
@@ -135,8 +136,10 @@ export function readSessionDetail(path, { rateOverrides, caps = CAP } = {}) {
       continue;
     }
 
-    const isPrompt = o.type === "user" && !o.isMeta && (fileHasPromptSource ? o.promptSource === "typed" : true);
-    if (isPrompt) {
+    // Shared with the aggregate reader rather than restated: the two must agree
+    // on what a prompt is, and an older transcript's tool results are user
+    // entries too — counting them here read a 2-prompt session as 26.
+    if (isTypedPrompt(o, fileHasPromptSource)) {
       s.typedPrompts += 1;
       s.events.push({ kind: "prompt", at: o.timestamp ?? null, ...clip(textOf(o.message?.content), caps.prompt) });
       continue;

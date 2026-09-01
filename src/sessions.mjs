@@ -45,7 +45,7 @@ export function* sessionFiles(root) {
  * notifications and reminders, and an absent value is a compaction
  * continuation. Older transcripts predate the field, so fall back to the shape.
  */
-function isTypedPrompt(o, fileHasPromptSource) {
+export function isTypedPrompt(o, fileHasPromptSource) {
   if (o.type !== "user" || o.isMeta) return false;
   if (fileHasPromptSource) return o.promptSource === "typed";
   const c = o.message?.content;
