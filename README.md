@@ -235,10 +235,23 @@ above — these are just the ones worth knowing about.
 `notify.desktop` raises a system notification. Set either to `false`.
 `MARMOT_NO_NOTIFY=1` silences both for one run, and CI is silent automatically.
 
-**If no notification ever appears (macOS).** macOS accepts a notification from
-an unauthorised app and drops it with no error, so this fails silently. The
-notification is posted by whichever app is running Marmot — your terminal —
-and that app has to be allowed to post.
+**How a notification gets to you.** Two channels, tried in order:
+
+1. **Your terminal posts it itself**, via an OSC escape sequence — iTerm2,
+   Ghostty, WezTerm, kitty, Konsole, Windows Terminal and Hyper all support
+   this. Nothing to install, nothing to allow, and it works the same on macOS,
+   Linux and Windows. This is the one that just works.
+2. **The operating system**, where the terminal has no such channel:
+   `osascript` on macOS, `notify-send` on Linux.
+
+Terminals that are not known to support the sequence never get sent one — an
+unrecognised escape code can print as garbage, and that is worse than a missing
+notification.
+
+**If no notification ever appears (macOS, channel 2).** macOS accepts a
+notification from an unauthorised app and drops it with no error, so this fails
+silently. The notification is posted by whichever app is running Marmot — your
+terminal — and that app has to be allowed to post.
 
 ```bash
 marmot doctor        # names the app, and says whether it may post
@@ -298,7 +311,7 @@ Marmot covers one developer on one machine, and stays small on purpose.
 ## Development
 
 ```bash
-npm test        # 243 tests, no dependencies, ~6s
+npm test        # 253 tests, no dependencies, ~6s
 ```
 
 ## License

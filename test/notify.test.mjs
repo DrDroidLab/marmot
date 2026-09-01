@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { notifyCommand, alert, silenced, deliverability } from "../src/notify.mjs";
+import { notifyCommand, alert, silenced, deliverability, oscNotifier, oscSequence } from "../src/notify.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +20,74 @@ const fakeStream = () => {
 
 const quiet = {}; // an env with nothing set — never process.env, or these
                   // tests read whichever terminal happens to be running them
+
+test("the terminal posts the notification itself where it can", () => {
+  // This is the channel worth having: nothing to install, nothing to grant,
+  // and identical on macOS, Linux and Windows.
+  assert.equal(oscNotifier({ TERM_PROGRAM: "iTerm.app" }).name, "iTerm2");
+  assert.equal(oscNotifier({ TERM_PROGRAM: "ghostty" }).name, "Ghostty");
+  assert.equal(oscNotifier({ TERM_PROGRAM: "WezTerm" }).name, "WezTerm");
+  assert.equal(oscNotifier({ WEZTERM_PANE: "0" }).name, "WezTerm");
+  assert.equal(oscNotifier({ KITTY_WINDOW_ID: "1" }).name, "kitty");
+  assert.equal(oscNotifier({ WT_SESSION: "abc" }).name, "Windows Terminal");
+  assert.equal(oscNotifier({ KONSOLE_VERSION: "22" }).name, "Konsole");
+});
+
+test("an unknown terminal gets no escape sequence at all", () => {
+  // Some terminals print an OSC they do not understand. Garbling the screen is
+  // worse than a missing notification, so only known ones are used.
+  assert.equal(oscNotifier({ TERM_PROGRAM: "vscode" }), null);
+  assert.equal(oscNotifier({ TERM_PROGRAM: "Apple_Terminal" }), null);
+  assert.equal(oscNotifier({}), null);
+});
+
+test("the escape sequence keeps the figures and cannot end itself early", () => {
+  const seq = oscSequence({ osc: 9 }, "Marmot · cost cap", "reached $82.50 against a $25.00 cap");
+  assert.match(seq, /\$82\.50/, "a cost nudge that loses its dollar sign is useless");
+  assert.equal(seq.slice(0, 4), "\x1b]9;");
+  assert.equal(seq.slice(-1), "\x07");
+
+  // `;` and control characters would terminate the sequence.
+  const nasty = oscSequence({ osc: 9 }, "T", "a;b\x07c\nd");
+  assert.equal((nasty.match(/;/g) ?? []).length, 1, "only the sequence's own separator");
+  assert.equal((nasty.match(/\x07/g) ?? []).length, 1, "only the terminator");
+});
+
+test("kitty and Konsole get their own forms", () => {
+  assert.match(oscSequence({ osc: 99 }, "T", "b"), /^\x1b\]99;/);
+  assert.match(oscSequence({ osc: 777 }, "T", "b"), /^\x1b\]777;notify;T;b\x07$/);
+  assert.equal(oscSequence({ osc: 9 }, "T", ""), null);
+});
+
+test("alert prefers the terminal, and says which one took it", (t) => {
+  const s = fakeStream();
+  const tmp = join(tmpdir(), `marmot-osc-${Date.now()}`);
+  const did = alert(
+    { notify: { bell: false, desktop: true } },
+    { body: "reached $82.50", title: "Marmot", platform: "darwin", stream: s, env: { TERM_PROGRAM: "iTerm.app" }, ttyPath: tmp },
+  );
+  assert.deepEqual(did.desktop, { via: "iTerm2" });
+  assert.match(readFileSync(tmp, "utf8"), /\x1b\]9;Marmot — reached \$82\.50\x07/);
+  rmSync(tmp, { force: true });
+});
+
+test("with no terminal channel it falls back to the OS", () => {
+  const s = fakeStream();
+  const did = alert(
+    { notify: { bell: false, desktop: true } },
+    { body: "a nudge", platform: "darwin", stream: s, env: { TERM_PROGRAM: "vscode", __CFBundleIdentifier: "com.microsoft.VSCode" }, ttyPath: null },
+  );
+  if (did.desktop) assert.equal(did.desktop.cmd, "osascript");
+});
+
+test("doctor reports the terminal channel when there is one", () => {
+  const d = deliverability({ platform: "darwin", env: { TERM_PROGRAM: "iTerm.app" } });
+  assert.equal(d.status, "ok");
+  assert.match(d.detail, /nothing to allow/);
+
+  // And on Linux too, where there is no permission model to check.
+  assert.equal(deliverability({ platform: "linux", env: { KITTY_WINDOW_ID: "1" } }).status, "ok");
+});
 
 test("both alerts are on by default", () => {
   assert.equal(DEFAULTS.notify.desktop, true);

@@ -29,6 +29,54 @@ const clean = (s, n = 180) =>
     .slice(0, n);
 
 /**
+ * Terminals that turn an OSC 9 escape sequence into a desktop notification.
+ *
+ * This is the channel to prefer, because it belongs to the terminal you are
+ * already using: it needs nothing installed, nothing granted, and works the
+ * same on macOS, Linux and Windows. The sequence is written to the controlling
+ * terminal, so it reaches you even from a hook whose output is a pipe.
+ *
+ * Only terminals known to support it are used. An unsupported terminal may
+ * print an unknown OSC sequence as text, and garbling the screen is worse than
+ * a missing notification.
+ */
+export function oscNotifier(env = process.env) {
+  const p = env.TERM_PROGRAM;
+  if (env.KITTY_WINDOW_ID || p === "kitty") return { name: "kitty", osc: 99 };
+  if (p === "iTerm.app") return { name: "iTerm2", osc: 9 };
+  if (p === "WezTerm" || env.WEZTERM_PANE) return { name: "WezTerm", osc: 9 };
+  if (p === "ghostty") return { name: "Ghostty", osc: 9 };
+  if (env.WT_SESSION) return { name: "Windows Terminal", osc: 9 };
+  if (env.KONSOLE_VERSION) return { name: "Konsole", osc: 777 };
+  if (p === "Hyper") return { name: "Hyper", osc: 9 };
+  return null;
+}
+
+/**
+ * The bytes that make a terminal raise a notification.
+ *
+ * Sanitised for a terminal rather than for AppleScript: control characters and
+ * `;` would end the sequence early, but `$` and quotes are ordinary text here
+ * and must survive — a cost nudge that loses its dollar sign is worse than no
+ * nudge at all.
+ */
+const oscClean = (s, n = 180) =>
+  String(s ?? "")
+    .replace(/[\x00-\x1f\x7f;]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, n);
+
+export function oscSequence(notifier, title, body) {
+  const t = oscClean(title, 60);
+  const b = oscClean(body);
+  if (!b) return null;
+  if (notifier.osc === 99) return `\x1b]99;i=1:d=0:p=title;${t}\x1b\\\x1b]99;i=1:d=1:p=body;${b}\x1b\\`;
+  if (notifier.osc === 777) return `\x1b]777;notify;${t};${b}\x07`;
+  return `\x1b]9;${t} — ${b}\x07`;
+}
+
+/**
  * The command that raises a desktop notification on this platform, or null
  * where there isn't one we can rely on being installed.
  */
@@ -77,8 +125,12 @@ export const silenced = (env = process.env) => Boolean(env.MARMOT_NO_NOTIFY || e
 export function deliverability({ platform = process.platform, env = process.env, run, app = null } = {}) {
   if (silenced(env)) return { deliverer: null, status: "silenced", detail: "MARMOT_NO_NOTIFY or CI is set" };
   if (platform !== "darwin") {
+    const t = app ? null : oscNotifier(env);
+    if (t) return { deliverer: t.name, status: "ok", detail: `${t.name} posts them itself, with nothing to allow` };
     return { deliverer: platform === "win32" ? null : "notify-send", status: "unknown", detail: "not checkable on this platform" };
   }
+  const term = app ? null : oscNotifier(env);
+  if (term) return { deliverer: term.name, status: "ok", detail: `${term.name} posts them itself, with nothing to allow` };
   const host = app ?? env.__CFBundleIdentifier ?? null;
   const deliverer = host ?? "com.apple.ScriptEditor2";
   try {
@@ -130,6 +182,25 @@ export function alert(cfg, { title = "Marmot", body = "", platform = process.pla
   }
 
   if (!n.desktop || silenced(env)) return did;
+
+  // The terminal's own notification first: nothing to install, nothing to
+  // grant, and it works the same everywhere. Only when the terminal has no
+  // such channel do we fall back to the OS, which on macOS needs permission
+  // the host app may not have.
+  const notifier = n.app ? null : oscNotifier(env);
+  if (notifier && ttyPath) {
+    const seq = oscSequence(notifier, title, body);
+    if (seq) {
+      try {
+        writeFileSync(ttyPath, seq);
+        did.desktop = { via: notifier.name };
+        return did;
+      } catch {
+        /* no controlling terminal — fall through to the OS */
+      }
+    }
+  }
+
   const c = notifyCommand(platform, title, body, env, n.app ?? null);
   if (!c) return did;
   try {
