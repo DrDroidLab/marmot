@@ -72,6 +72,14 @@ export const DEFAULTS = {
     // A cached percentage older than this is reported with its age attached
     // rather than as current.
     staleAfterMins: 60,
+    // Spending a window faster than it passes. The three guards, as everywhere:
+    // a ratio gap (how far ahead of pace), a minimum sample (enough of the
+    // window gone for the ratio to mean anything) and a floor (enough of the
+    // allowance used to be worth a word).
+    paceRatio: 1.5,
+    paceMinElapsed: 15,
+    paceMinUsed: 20,
+
     // When the snapshot is stale or its window has reset, ask Claude Code to
     // refresh it: `claude -p /usage` is handled client-side, costs no tokens
     // and creates no session. Set false to only ever read what is cached.

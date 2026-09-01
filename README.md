@@ -55,6 +55,7 @@ of what it looks for:
 | `cache-hit` | Context being rebuilt each turn instead of continued — cache reads cost a tenth of fresh input |
 | `tool-errors` | Failed calls, paid for twice: once to fail, once to retry |
 | `limit-reached` | Half, three quarters, then nine tenths of your plan's 5-hour or weekly allowance gone |
+| `limit-pace` | Spending a window faster than it passes — 78% gone with half the week left |
 | `daily-baseline` | A day well past your own normal, whatever normal is for you |
 | `session-cost` / `daily-cost` | A session or day past a dollar ceiling — **pay-as-you-go only**, see below |
 
@@ -299,6 +300,17 @@ terminal to attach it to, so `/marmot:config` opens a window instead of hanging.
 `limit-reached` speaks at marks on the way to a limit rather than at one cap,
 so you hear *half gone* long before *nearly out*. Each mark speaks once.
 
+`limit-pace` answers the question a percentage cannot: **78% used is fine on the
+last day of the week and alarming on the first.** It compares how much of the
+window you have spent against how much of it has passed, and speaks only when
+the allowance would run out with time still on the clock:
+
+```
+  ▲ Spending your weekly allowance faster than it refills
+    43% through the weekly window with 78% of it gone — 1.8× the pace that
+    would last. At this rate it runs out in about 20.3h, 3.2d before it resets.
+```
+
 ```jsonc
 "limits": {
   "enabled": true,
@@ -351,7 +363,8 @@ them work.
   "digest": { "cadence": "daily" },
 
   // Marks on the way to your plan's limits. Each speaks once. See below.
-  "limits": { "enabled": true, "steps": [50, 75, 90], "autoRefresh": true },
+  "limits": { "enabled": true, "steps": [50, 75, 90], "autoRefresh": true,
+               "paceRatio": 1.5, "paceMinElapsed": 15, "paceMinUsed": 20 },
 
   // The report measures your MCP servers when it has nothing recent.
   // autoAudit false means it only ever measures when you ask it to.

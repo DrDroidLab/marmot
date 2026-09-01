@@ -12,7 +12,7 @@
 
 import { configuredServers, byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins } from "./format.mjs";
-import { paysPerToken, usableLimits } from "./plan.mjs";
+import { paysPerToken, usableLimits, limitPace } from "./plan.mjs";
 
 const premiumCost = (s, cfg) =>
   Object.entries(s.models)
@@ -288,6 +288,28 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
           l.kind === "session"
             ? "The 5-hour window refills on its own. Heavy context is what fills it fastest, so a fresh session or a /compact buys back more than working slower does."
             : "Worth knowing before the week is out. The cheapest savings are usually idle MCP servers and sessions carrying context they finished with.",
+        sessions: [],
+      });
+    }
+  }
+
+  // Burning a window faster than it passes. A percentage alone cannot tell you
+  // whether it is a problem — 78% is fine on the last day of the week and
+  // alarming on the first.
+  if (cfg.limits?.enabled && plan?.limits?.length) {
+    for (const l of usableLimits(plan)) {
+      const p = limitPace(l);
+      if (!p || !p.exhaustsBeforeReset) continue;
+      if (p.pace < cfg.limits.paceRatio) continue;
+      if (p.elapsedPct < cfg.limits.paceMinElapsed) continue;
+      if (l.percent < cfg.limits.paceMinUsed) continue;
+      out.push({
+        id: "limit-pace",
+        key: `limit-pace:${l.kind}:${Math.floor(p.pace * 2) / 2}`,
+        label: `Spending your ${l.label} allowance faster than it refills`,
+        detail: `${Math.round(p.elapsedPct)}% through the ${l.label} window with ${l.percent}% of it gone — ${p.pace.toFixed(1)}× the pace that would last. At this rate it runs out in about ${mins(p.exhaustsInMs / 60_000)}, ${mins((p.remainingMs - p.exhaustsInMs) / 60_000)} before it resets.`,
+        action:
+          "The levers, biggest first: detach MCP servers you are not calling, start a fresh session rather than carrying context you have finished with, and drop to Sonnet for work that does not need more.",
         sessions: [],
       });
     }

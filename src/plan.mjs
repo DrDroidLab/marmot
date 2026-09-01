@@ -159,6 +159,43 @@ export const usableLimits = (plan) =>
 /** True when we hold readings, but none of them still describe a live window. */
 export const limitsExpired = (plan) => Boolean(plan?.limits?.length) && usableLimits(plan).length === 0;
 
+/**
+ * How long each window is. Needed to turn "78% used" into "78% used with a day
+ * left", which is the difference between a number and something to act on.
+ */
+export const WINDOW_MS = { session: 5 * 3_600_000, five_hour: 5 * 3_600_000, weekly_all: 7 * 86_400_000, weekly_scoped: 7 * 86_400_000, seven_day: 7 * 86_400_000 };
+
+/**
+ * Whether a window is being spent faster than it is passing.
+ *
+ * `pace` is share-used over share-elapsed: 1.0 is exactly on track to reach the
+ * limit as the window ends, 2.0 is running out in half the time. `exhaustsInMs`
+ * is how long the remaining allowance lasts at this rate — null when the pace
+ * would not reach the limit at all.
+ */
+export function limitPace(limit, now = Date.now()) {
+  const len = WINDOW_MS[limit?.kind];
+  if (!len || !limit?.resetsAt) return null;
+  const remainingMs = Date.parse(limit.resetsAt) - now;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+
+  const elapsedPct = (1 - remainingMs / len) * 100;
+  if (elapsedPct <= 0) return null; // the window has only just begun
+  const pace = limit.percent / elapsedPct;
+  const left = 100 - limit.percent;
+  // At this rate, how much longer the remaining allowance lasts.
+  const perMs = elapsedPct > 0 ? limit.percent / (len - remainingMs) : 0;
+  const exhaustsInMs = perMs > 0 ? left / perMs : null;
+  return {
+    elapsedPct,
+    remainingMs,
+    pace,
+    exhaustsInMs,
+    // Only interesting when it runs out with time still on the clock.
+    exhaustsBeforeReset: exhaustsInMs !== null && exhaustsInMs < remainingMs,
+  };
+}
+
 /** The single limit closest to being reached, which is the one worth saying. */
 export function tightestLimit(limits = []) {
   return limits.reduce((a, l) => (a === null || l.percent > a.percent ? l : a), null);

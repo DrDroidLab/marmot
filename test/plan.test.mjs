@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readPlan, planName, paysPerToken, tightestLimit, usableLimits, limitsExpired, worthRefreshing, refreshUsage } from "../src/plan.mjs";
+import { readPlan, planName, paysPerToken, tightestLimit, usableLimits, limitsExpired, worthRefreshing, refreshUsage, limitPace } from "../src/plan.mjs";
 import { windowRules, limitSteps, sessionRules, evaluate } from "../src/rules.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { tmpRoot } from "./helpers.mjs";
@@ -355,4 +355,74 @@ test("refreshUsage reports whether the snapshot actually moved", (t) => {
   });
   assert.equal(moved.refreshed, true);
   assert.equal(limitsExpired(moved.plan), false);
+});
+
+/* ── pace: a percentage means nothing without the clock beside it ──────── */
+
+const weekly = (percent, daysLeft) => ({
+  kind: "weekly_all",
+  label: "weekly",
+  percent,
+  resetsAt: new Date(Date.now() + daysLeft * 86_400_000).toISOString(),
+  active: true,
+});
+
+test("pace is share used over share elapsed", () => {
+  // Half the week gone, half the allowance gone: exactly on track.
+  const onTrack = limitPace(weekly(50, 3.5));
+  assert.ok(Math.abs(onTrack.pace - 1) < 0.05, `pace was ${onTrack.pace}`);
+  assert.equal(onTrack.exhaustsBeforeReset, false);
+
+  // Same 50%, but only a fifth of the week gone: running out early.
+  const fast = limitPace(weekly(50, 5.6));
+  assert.ok(fast.pace > 2, `pace was ${fast.pace}`);
+  assert.equal(fast.exhaustsBeforeReset, true);
+});
+
+test("pace needs a window length and a reset time it can trust", () => {
+  assert.equal(limitPace({ kind: "unknown_window", percent: 50, resetsAt: new Date(Date.now() + 1000).toISOString() }), null);
+  assert.equal(limitPace({ kind: "weekly_all", percent: 50, resetsAt: null }), null);
+  assert.equal(limitPace(weekly(50, -1)), null, "a window that has passed has no pace");
+  assert.equal(limitPace(weekly(50, 7)), null, "nothing has elapsed yet");
+});
+
+test("limit-pace fires when a window runs out before it resets", () => {
+  const plan = { plan: "Max 20×", ageMins: 1, limits: [weekly(78, 4)] };
+  const hit = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan }).find((w) => w.id === "limit-pace");
+  assert.ok(hit);
+  assert.match(hit.detail, /through the weekly window with 78% of it gone/);
+  assert.match(hit.detail, /the pace that would last/);
+  assert.match(hit.detail, /before it resets/);
+  assert.match(hit.action, /detach MCP servers/);
+});
+
+test("limit-pace carries all three guards", () => {
+  const fire = (limit, cfg = DEFAULTS) =>
+    windowRules([], cfg, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", ageMins: 1, limits: [limit] } }).find((w) => w.id === "limit-pace");
+
+  assert.equal(fire(weekly(50, 3.5)), undefined, "on pace is not a problem");
+  assert.equal(fire(weekly(30, 6)), undefined, "too early in the window for a ratio to mean anything");
+  assert.equal(fire(weekly(10, 6.2)), undefined, "below the floor, however steep the ratio");
+  assert.ok(fire(weekly(78, 4)), "past all three");
+});
+
+test("limit-pace says nothing when you are nearly out but on track", () => {
+  // 95% used with hours left is not a pace problem — limit-reached covers it,
+  // and two nudges about the same thing is how both get muted.
+  const plan = { plan: "Max 20×", ageMins: 1, limits: [weekly(95, 0.2)] };
+  const out = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan });
+  assert.equal(out.find((w) => w.id === "limit-pace"), undefined);
+  assert.ok(out.find((w) => w.id === "limit-reached"), "but the mark still speaks");
+});
+
+test("limit-pace re-speaks only when the pace itself worsens", () => {
+  const key = (pct, days) =>
+    windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", ageMins: 1, limits: [weekly(pct, days)] } }).find((w) => w.id === "limit-pace")?.key;
+  assert.equal(key(78, 4), key(79, 4), "the same pace is the same news");
+  assert.notEqual(key(78, 4), key(90, 4), "a steeper one is not");
+});
+
+test("an expired window has no pace either", () => {
+  const plan = { plan: "Max 20×", ageMins: 1, limits: [{ ...weekly(90, 4), expired: true }] };
+  assert.equal(windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan }).length, 0);
 });
