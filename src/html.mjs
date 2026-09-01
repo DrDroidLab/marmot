@@ -77,6 +77,15 @@ tbody tr:hover{background:var(--surface-2)}
 .kpi .v{font-size:21px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .kpi .n{font-size:11.5px;color:var(--ink-3);margin-top:2px}
 
+/* --- per-day columns. Deliberately not .stack, which is the 13px token bar. --- */
+.byday{display:flex;align-items:flex-end;gap:2px;height:120px;margin:4px 0 0}
+.byday .col{flex:1;min-width:3px;display:flex;flex-direction:column-reverse;height:100%;border-radius:2px;overflow:hidden;background:var(--track)}
+.byday .col i{display:block;width:100%}
+.byday .col:hover{outline:1px solid var(--ink-3)}
+.dlegend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:11.5px;color:var(--ink-2)}
+.dlegend span{display:inline-flex;align-items:center;gap:5px}
+.dlegend span i{width:9px;height:9px;border-radius:2px;display:inline-block;flex:0 0 auto}
+
 /* --- nudges --- */
 .nudge{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:9px;padding:11px 14px;margin-bottom:8px}
 .nudge h3{margin:0 0 4px;font-size:13px;font-weight:600}
@@ -237,10 +246,83 @@ function filelist(files){
 
 /* ---------------- index ---------------- */
 var sortKey="cost", sortDir=-1;
+/** Your plan's own limits, which on a subscription are the real ceiling. */
+function planKpis(){
+  var P=D.summary&&D.summary.plan; if(!P||!P.limits) return "";
+  var out="";
+  for(var i=0;i<P.limits.length;i++){
+    var l=P.limits[i];
+    if(!l.active&&l.percent===0&&!l.resetsAt) continue;
+    var name=l.label.charAt(0).toUpperCase()+l.label.slice(1)+" limit";
+    if(l.expired){ out+=kpi(name,"\u2014","that window has since reset"); continue; }
+    out+=kpi(name,l.percent+"%",l.resetsAt?"resets "+resetIn(l.resetsAt):"");
+  }
+  if(P.spend&&P.spend.enabled&&P.spend.limit) out+=kpi("Usage credits",usd(P.spend.used||0)+" of "+usd(P.spend.limit),"real money");
+  return out;
+}
+
+function resetIn(iso){
+  var m=(Date.parse(iso)-Date.now())/60000;
+  if(!isFinite(m)) return "";
+  return m<=0?"shortly":"in "+mins(m);
+}
+
+/**
+ * One series over the window, as a stacked column per day. Answers what a total
+ * cannot: whether a skill, server or model is a habit or a one-off.
+ */
+function stackedByDay(title,cap,days,keys,pick){
+  if(!days.length||!keys.length) return "";
+  var max=0;
+  days.forEach(function(d){ var t=0; keys.forEach(function(k){ t+=pick(d,k)||0; }); if(t>max) max=t; });
+  if(!max) return "";
+  var pal=["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--accent)","var(--warn)"];
+  var cols=days.map(function(d){
+    var segs="",total=0;
+    keys.forEach(function(k,i){
+      var v=pick(d,k)||0; if(!v) return; total+=v;
+      segs+='<i style="height:'+(v/max*100)+'%;background:'+pal[i%pal.length]+'"></i>';
+    });
+    return '<div class="col" title="'+esc(d.day)+" \u00b7 "+num(total)+'">'+segs+'</div>';
+  }).join("");
+  var legend=keys.map(function(k,i){
+    return '<span><i style="background:'+pal[i%pal.length]+'"></i>'+esc(k)+'</span>';
+  }).join("");
+  return '<div class="panel"><h2>'+esc(title)+'</h2><p class="cap">'+esc(cap)+'</p>'
+    +'<div class="byday">'+cols+'</div>'
+    +'<div class="axis"><span>'+esc(days[0].day)+'</span><span>'+esc(days[days.length-1].day)+'</span></div>'
+    +'<div class="dlegend">'+legend+'</div></div>';
+}
+
+/** Per-day totals for skills, MCP servers and models, from the sessions. */
+function seriesByDay(){
+  var byDay={};
+  S.forEach(function(s){
+    var d=byDay[s.day]||(byDay[s.day]={day:s.day,skills:{},mcp:{},models:{}});
+    var k;
+    for(k in (s.skillCounts||{})) d.skills[k]=(d.skills[k]||0)+s.skillCounts[k];
+    for(k in (s.mcpCounts||{})) d.mcp[k]=(d.mcp[k]||0)+s.mcpCounts[k];
+    for(k in (s.modelTokens||{})) d.models[k]=(d.models[k]||0)+((s.modelTokens[k]||{}).total||0);
+  });
+  return Object.keys(byDay).sort().map(function(k){ return byDay[k]; });
+}
+
+/** The names worth a colour: the biggest few, so a legend stays readable. */
+function topKeys(days,field,n){
+  var totals={};
+  days.forEach(function(d){ for(var k in d[field]) totals[k]=(totals[k]||0)+d[field][k]; });
+  return Object.keys(totals).sort(function(a,b){ return totals[b]-totals[a]; }).slice(0,n);
+}
+
 /** Models, skills, MCP servers and the nudges: the report, on the page. */
 function summaryPanels(){
   var Z=D.summary; if(!Z||!Z.totals) return "";
   var M=Z.totals, out="";
+
+  var days=seriesByDay();
+  out+=stackedByDay("Model tokens by day","Which model the window's tokens went to, day by day.",days,topKeys(days,"models",6),function(d,k){return d.models[k];});
+  out+=stackedByDay("Skills by day","How often each skill loaded. A habit looks different from a one-off.",days,topKeys(days,"skills",6),function(d,k){return d.skills[k];});
+  out+=stackedByDay("MCP calls by day","Calls per server. A server with no bar all window is one you pay for on every request and never use.",days,topKeys(days,"mcp",6),function(d,k){return d.mcp[k];});
 
   var models=Object.keys(M.models||{}).map(function(m){return [m,M.models[m]];}).sort(function(a,b){return b[1]-a[1];});
   if(models.length){
@@ -333,6 +415,7 @@ function renderIndex(){
       +kpi("Cache hit rate",M&&M.cacheHitRate!=null?pct(M.cacheHitRate):"—","higher is cheaper")
       +kpi("Tool calls",num(tot.tc),M&&M.toolCalls?pct(M.toolErrors/M.toolCalls)+" failed":"")
       +(M&&M.baseline!=null?kpi("Baseline context",tok(M.baseline),"before you type"):"")
+      +planKpis()
     +'</div>'
     +summaryPanels()
     +'<div class="tablewrap"><table><thead><tr>'

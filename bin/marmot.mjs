@@ -60,7 +60,7 @@ if (has("help") || cmd === "help") {
 
   report only
     --sessions        List every session in the window under the report
-    --browse          Also build and open the session browser page
+    --no-browse       Do not build and open the session browser page
     --no-audit        Do not measure MCP servers, even with no recent figures
     --no-refresh      Do not refresh plan limits, even when the window has reset
 
@@ -281,6 +281,7 @@ async function runBrowse() {
   const sizes = await mcpSizes();
   const summary = {
     totals: totals(detailed),
+    plan: has("demo") ? null : await readPlanFresh(),
     nudges: evaluate(detailed, cfg, {
       root: ROOT,
       cwd: process.cwd(),
@@ -298,7 +299,10 @@ async function runBrowse() {
 
   const outDir = join(ROOT, "marmot");
   mkdirSync(outDir, { recursive: true });
-  const out = flag("out", join(outDir, `sessions-${new Date().toISOString().slice(0, 10)}.html`));
+  // Timestamped to the minute. A fixed name per day let the browser serve its
+  // cached copy of an earlier run, which is a report that quietly stops moving.
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+  const out = flag("out", join(outDir, `sessions-${stamp}.html`));
   const html = buildHtml(detailed, { days: DAYS, root: ROOT, redacted, summary });
   writeFileSync(out, html);
 
@@ -488,9 +492,10 @@ process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEM
 // `--sessions` and `--browse` are what make one command enough: the numbers,
 // every session behind them, and the full page when you want to dig in.
 if (has("sessions")) process.stdout.write(`\n${renderSessionList(sessions, { heading: true })}\n\n`);
-if (has("browse")) {
+
+// The page is the better place to read all of this, so it is built and opened
+// unless you say otherwise. `--no-browse` keeps the run to the terminal.
+if (!has("no-browse") && !has("json")) {
   process.stdout.write("\n");
   await runBrowse();
-} else if (has("sessions")) {
-  process.stdout.write(dim("  --browse opens the full page: every prompt, reply and tool call.\n\n"));
 }

@@ -230,21 +230,25 @@ pre-commit hook.
 |---|---|
 | `--days N` | Window, default 30 |
 | `--sessions` | Add the per-session list to the report |
-| `--browse` | Also build and open the session browser page |
 | `--demo` | Synthetic data, safe for screenshots |
 | `--json` | Machine-readable |
 | `--root DIR` | Claude Code home, default `~/.claude` |
 | `--session ID` | `browse`: just this one |
 | `--limit N` | `browse`: most recent N, default 25 |
 | `--no-text` | `browse`: counts and tool names only, no prompts |
+| `--no-browse` | Stay in the terminal; do not build or open the page |
 | `--no-audit` | Skip measuring MCP servers this run |
 | `--no-refresh` | Skip refreshing plan limits this run |
 
 ### Chasing a nudge to its source
 
-One self-contained HTML file, written locally and opened in your browser — no CDN, no network, no web fonts.
+`marmot` builds the page and opens it every run — `--no-browse` keeps things in
+the terminal. Each run writes a **new file**, stamped to the minute, so the
+browser can never serve you a cached copy of an earlier one.
 
-It opens on **the same figures as the report** — spend, tokens, cache, baseline context, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. From there each session opens onto its full timeline — every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle — which is how you find the turn where a session started getting expensive.
+One self-contained HTML file, written locally — no CDN, no network, no web fonts.
+
+It opens on **the same figures as the report** — spend, tokens, cache, baseline context, your plan's live limit percentages, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. Models, skills and MCP calls each get a stacked column per day across the window, which answers what a total cannot: whether something is a habit or a one-off, and which server has no bar at all. From there each session opens onto its full timeline — every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle — which is how you find the turn where a session started getting expensive.
 
 ![The session browser](docs/browse-index.png)
 

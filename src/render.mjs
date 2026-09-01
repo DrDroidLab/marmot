@@ -254,13 +254,15 @@ export function renderNudges({ sessionNudges, windowNudges }, { heading = false,
     const n = g.hits.length;
     out.push(`  ${warn("▲")} ${bold(g.label)} ${dim(`· ${n} session${n === 1 ? "" : "s"}`)}`);
     if (compact) {
-      out.push(wrap(g.hits[0].detail, 76, "    "));
+      const dearest = [...g.hits].sort((a, b) => (b.session.cost ?? 0) - (a.session.cost ?? 0))[0];
+      out.push(wrap(dearest.detail, 76, "    "));
     } else {
-      for (const h of g.hits.slice(0, 3)) {
+      // Every one of them, dearest first: a truncated list hides exactly the
+      // sessions worth looking at, and the order is the whole point.
+      for (const h of [...g.hits].sort((a, b) => (b.session.cost ?? 0) - (a.session.cost ?? 0))) {
         out.push(wrap(h.detail, 76, "    "));
         out.push(dim(`      ${h.session.id.slice(0, 8)} · ${h.session.day} · ${h.session.cwd ?? "?"}`));
       }
-      if (n > 3) out.push(dim(`    …and ${n - 3} more`));
       out.push(dim(wrap(g.hits[0].action, 76, "    ")));
     }
     out.push("");
