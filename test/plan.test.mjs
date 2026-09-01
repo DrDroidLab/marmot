@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readPlan, planName, paysPerToken, tightestLimit } from "../src/plan.mjs";
-import { windowRules, limitSteps } from "../src/rules.mjs";
+import { windowRules, limitSteps, sessionRules, evaluate } from "../src/rules.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { tmpRoot } from "./helpers.mjs";
 
@@ -191,4 +191,60 @@ test("no plan means no limit nudges at all", () => {
   for (const plan of [null, { plan: null, limits: [] }]) {
     assert.equal(windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan }).length, 0);
   }
+});
+
+/* ── dollars only mean something when you are billed per token ─────────── */
+
+const bigDay = [
+  { id: "a", day: "2026-09-01", cost: 300, models: { "claude-opus-5": 300 }, typedPrompts: 40, assistantTurns: 500, totalToolCalls: 400, toolErrors: 0, toolErrorRate: 0, cacheHitRate: 0.98, compactions: 0, mcpCalls: {}, skills: [], filesTouched: new Set(), dirTouches: {}, promptTimes: [], baselineTokens: 30000 },
+  { id: "b", day: "2026-09-01", cost: 211, models: { "claude-opus-5": 211 }, typedPrompts: 30, assistantTurns: 400, totalToolCalls: 300, toolErrors: 0, toolErrorRate: 0, cacheHitRate: 0.98, compactions: 0, mcpCalls: {}, skills: [], filesTouched: new Set(), dirTouches: {}, promptTimes: [], baselineTokens: 30000 },
+];
+const opts = (plan) => ({ today: "2026-09-01", includeMcp: false, plan });
+
+test("a subscription is not nudged about dollars it was never charged", () => {
+  // $511 in a day on Max 20x is a Tuesday, not overspending. A rule that says
+  // otherwise every day gets muted along with the ones worth reading.
+  const max = { plan: "Max 20×", ageMins: 2, limits: [] };
+  assert.equal(windowRules(bigDay, DEFAULTS, opts(max)).find((w) => w.id === "daily-cost"), undefined);
+
+  const sessionCost = sessionRules.find((r) => r.id === "session-cost");
+  assert.equal(sessionCost.check(bigDay[0], DEFAULTS, { plan: max }), null);
+});
+
+test("pay-as-you-go still gets both, because there the figure is the bill", () => {
+  const api = { plan: "API", ageMins: 2, limits: [] };
+  assert.ok(windowRules(bigDay, DEFAULTS, opts(api)).find((w) => w.id === "daily-cost"));
+  assert.ok(sessionRules.find((r) => r.id === "session-cost").check(bigDay[0], DEFAULTS, { plan: api }));
+});
+
+test("an undetected plan is treated as billed, which is the safe way round", () => {
+  // Better to mention a cost that turns out not to be charged than to stay
+  // silent about one that is.
+  for (const plan of [null, { plan: null, limits: [] }]) {
+    assert.ok(windowRules(bigDay, DEFAULTS, opts(plan)).find((w) => w.id === "daily-cost"));
+  }
+});
+
+test("a subscription still hears about waste, which is the point", () => {
+  const max = { plan: "Max 20×", ageMins: 2, limits: [] };
+  const wasteful = {
+    ...bigDay[0],
+    typedPrompts: 60,
+    cacheHitRate: 0.2,
+    toolErrors: 90,
+    toolErrorRate: 0.3,
+  };
+  const ids = sessionRules.map((r) => [r.id, r.check(wasteful, DEFAULTS, { plan: max })]).filter(([, hit]) => hit).map(([id]) => id);
+  assert.ok(ids.includes("session-turns"), "long session with no reset");
+  assert.ok(ids.includes("cache-hit"), "context being rebuilt");
+  assert.ok(ids.includes("tool-errors"), "calls paid for twice");
+  assert.ok(!ids.includes("session-cost"), "but not the dollar cap");
+});
+
+test("evaluate passes the plan down to the session rules", () => {
+  const max = { plan: "Max 20×", ageMins: 2, limits: [] };
+  const onMax = evaluate(bigDay, DEFAULTS, { ...opts(max) });
+  const onApi = evaluate(bigDay, DEFAULTS, { ...opts({ plan: "API", limits: [] }) });
+  assert.equal(onMax.sessionNudges.find((g) => g.id === "session-cost"), undefined);
+  assert.ok(onApi.sessionNudges.find((g) => g.id === "session-cost"));
 });

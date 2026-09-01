@@ -55,7 +55,8 @@ of what it looks for:
 | `cache-hit` | Context being rebuilt each turn instead of continued — cache reads cost a tenth of fresh input |
 | `tool-errors` | Failed calls, paid for twice: once to fail, once to retry |
 | `limit-reached` | Half, three quarters, then nine tenths of your plan's 5-hour or weekly allowance gone |
-| `session-cost` / `daily-cost` / `daily-baseline` | A session or a day past the ceiling you set, or well past your own normal |
+| `daily-baseline` | A day well past your own normal, whatever normal is for you |
+| `session-cost` / `daily-cost` | A session or day past a dollar ceiling — **pay-as-you-go only**, see below |
 
 Every rule is deterministic and local. **No model decides whether to nudge
 you**, and every threshold is yours to move.
@@ -343,11 +344,14 @@ them work.
 `marmot config` writes every key with its default — these are the ones worth
 knowing about.
 
-**On a subscription, `limits` matters more than the cost caps.** `session.costCap`
-and `daily.costCap` are measured in modelled dollars, which is a good way to
-compare your own sessions and not a thing you are charged. The limit marks are
-the real ceiling. On pay-as-you-go it is the other way round: the dollars are
-the bill, and there is no limit to run out of.
+**The dollar caps do not fire on a subscription at all.** `session.costCap` and
+`daily.costCap` are absolute figures in modelled dollars, and on a plan you pay
+a flat fee for, "$511 today against a $50 cap" is not overspending — it is a
+Tuesday. A rule that says otherwise every day gets muted along with the ones
+worth reading, so Marmot skips them once it detects a subscription and leans on
+`limit-reached` and `daily-baseline` instead. On pay-as-you-go they fire
+normally, because there the figure really is the bill. A plan it cannot detect
+is treated as billed, which is the safer way round.
 
 **Turning the alerts down.** `notify.bell` rings the terminal bell,
 `notify.desktop` raises a system notification. Set either to `false`.

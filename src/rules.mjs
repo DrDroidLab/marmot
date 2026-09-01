@@ -12,6 +12,7 @@
 
 import { configuredServers, byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins } from "./format.mjs";
+import { paysPerToken } from "./plan.mjs";
 
 const premiumCost = (s, cfg) =>
   Object.entries(s.models)
@@ -31,6 +32,18 @@ const isLightPath = (p, cfg) => {
   if (segments.slice(0, -1).some((seg) => cfg.models.lightWorkDirs.includes(seg))) return true;
   return cfg.models.lightWorkFilePatterns.some((rx) => new RegExp(rx).test(base));
 };
+
+/**
+ * Whether an absolute dollar cap means anything on this plan.
+ *
+ * On a subscription the money is already spent, so "$511 today against a $50
+ * cap" is not overspending — it is a Tuesday, and a rule that says otherwise
+ * every single day gets muted along with the ones worth reading. Absolute
+ * dollar caps apply to pay-as-you-go, and to an unknown plan, where the figure
+ * really is the bill. Everything else on a subscription is judged against your
+ * own normal or against the plan's own limits.
+ */
+const dollarsAreBilled = (plan) => !plan?.plan || paysPerToken(plan.plan);
 
 /**
  * The areas of the tree a session worked in, oldest first.
@@ -129,7 +142,8 @@ export const sessionRules = [
   {
     id: "session-cost",
     label: "Session past the cost cap",
-    check(s, cfg) {
+    check(s, cfg, ctx = {}) {
+      if (!dollarsAreBilled(ctx.plan)) return null;
       if (s.cost <= cfg.session.costCap) return null;
       return {
         detail: `This session has reached ${usd(s.cost)} against a ${usd(cfg.session.costCap)} cap, over ${s.assistantTurns} model turns.`,
@@ -222,7 +236,7 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
   const days = byDay(sessions);
   const todayRow = days.find((d) => d.day === today);
 
-  if (todayRow && todayRow.cost > cfg.daily.costCap) {
+  if (todayRow && dollarsAreBilled(plan) && todayRow.cost > cfg.daily.costCap) {
     out.push({
       id: "daily-cost",
       label: "Day past the cost cap",
@@ -339,7 +353,7 @@ export function evaluate(sessions, cfg, opts = {}) {
   for (const s of sessions) {
     for (const rule of sessionRules) {
       if (opts.only && !opts.only.includes(rule.id)) continue;
-      const hit = rule.check(s, cfg);
+      const hit = rule.check(s, cfg, opts);
       if (!hit) continue;
       const g = grouped.get(rule.id) ?? { id: rule.id, label: rule.label, hits: [] };
       g.hits.push({ session: s, ...hit });
