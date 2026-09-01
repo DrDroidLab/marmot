@@ -15,6 +15,7 @@
  */
 
 import { spawn, execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 
 /**
  * Strip what could break out of the AppleScript string literal we build below,
@@ -31,7 +32,7 @@ const clean = (s, n = 180) =>
  * The command that raises a desktop notification on this platform, or null
  * where there isn't one we can rely on being installed.
  */
-export function notifyCommand(platform, title, body, env = process.env) {
+export function notifyCommand(platform, title, body, env = process.env, app = null) {
   const t = clean(title, 60);
   const b = clean(body);
   if (!b) return null;
@@ -40,9 +41,15 @@ export function notifyCommand(platform, title, body, env = process.env) {
     // people have never authorised — macOS then accepts it and drops it with no
     // error at all. Attributing it to the host terminal, which the user has
     // usually already allowed, is the difference between arriving and not.
-    const host = env?.__CFBundleIdentifier;
-    const script = host
-      ? `tell application id "${clean(host, 80)}" to display notification "${b}" with title "${t}"`
+    //
+    // `notify.app` overrides that, because some hosts can never be granted:
+    // an app absent from System Settings cannot be switched on there, so you
+    // need to be able to point this at one that is.
+    const as = app ? clean(app, 80) : null;
+    const host = as ?? (env?.__CFBundleIdentifier ? clean(env.__CFBundleIdentifier, 80) : null);
+    const target = host ? (host.includes(".") ? `application id "${host}"` : `application "${host}"`) : null;
+    const script = target
+      ? `tell ${target} to display notification "${b}" with title "${t}"`
       : `display notification "${b}" with title "${t}"`;
     return { cmd: "osascript", args: ["-e", script] };
   }
@@ -67,12 +74,12 @@ export const silenced = (env = process.env) => Boolean(env.MARMOT_NO_NOTIFY || e
  * dropped without an error — so `marmot doctor` can say so rather than leaving
  * you to wonder why the bell rings and nothing appears.
  */
-export function deliverability({ platform = process.platform, env = process.env, run } = {}) {
+export function deliverability({ platform = process.platform, env = process.env, run, app = null } = {}) {
   if (silenced(env)) return { deliverer: null, status: "silenced", detail: "MARMOT_NO_NOTIFY or CI is set" };
   if (platform !== "darwin") {
     return { deliverer: platform === "win32" ? null : "notify-send", status: "unknown", detail: "not checkable on this platform" };
   }
-  const host = env.__CFBundleIdentifier ?? null;
+  const host = app ?? env.__CFBundleIdentifier ?? null;
   const deliverer = host ?? "com.apple.ScriptEditor2";
   try {
     const exec = run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"] }));
@@ -95,22 +102,35 @@ export function deliverability({ platform = process.platform, env = process.env,
  * which is what the tests assert on — firing a real popup to check is not a
  * test anyone wants to run.
  */
-export function alert(cfg, { title = "Marmot", body = "", platform = process.platform, stream = process.stderr, env = process.env } = {}) {
+export function alert(cfg, { title = "Marmot", body = "", platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
   const n = cfg?.notify ?? {};
   const did = { bell: false, desktop: null };
 
   if (n.bell && !silenced(env)) {
-    try {
-      // stderr, never stdout: the hook's stdout is JSON that Claude Code parses.
-      stream.write("\x07");
-      did.bell = true;
-    } catch {
-      /* a closed stream is not worth a word */
+    // A hook's stderr is a pipe Claude Code reads, not a terminal, so a bell
+    // written there is swallowed. The controlling terminal is the only place it
+    // can actually ring; stderr is the fallback for when we are run directly.
+    if (ttyPath) {
+      try {
+        writeFileSync(ttyPath, "\x07");
+        did.bell = "tty";
+      } catch {
+        /* no controlling terminal — fall through */
+      }
+    }
+    if (!did.bell) {
+      try {
+        // Never stdout: the hook's stdout is JSON that Claude Code parses.
+        stream.write("\x07");
+        did.bell = "stderr";
+      } catch {
+        /* a closed stream is not worth a word */
+      }
     }
   }
 
   if (!n.desktop || silenced(env)) return did;
-  const c = notifyCommand(platform, title, body, env);
+  const c = notifyCommand(platform, title, body, env, n.app ?? null);
   if (!c) return did;
   try {
     // Detached and unreferenced, so the hook can exit without waiting on it.

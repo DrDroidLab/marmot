@@ -74,7 +74,16 @@ export const DEFAULTS = {
 
   // How a nudge reaches you, beyond the line in the transcript. Both on to
   // start with; a nudge you scroll past is a nudge that did not happen.
-  notify: { desktop: true, bell: true },
+  notify: {
+    desktop: true,
+    bell: true,
+    // Which app posts the notification, when the one running Marmot cannot.
+    // macOS only lists apps that have registered themselves, and an app that
+    // is not listed cannot be allowed — so point this at one that is (a bundle
+    // id like "com.googlecode.iterm2", or an app name like "Script Editor").
+    // `marmot doctor` says whether the current one may actually post.
+    app: null,
+  },
 
   cache: { minHitRate: 0.7, minTurns: 20 },
   toolErrors: { maxRate: 0.1, minCalls: 20 },

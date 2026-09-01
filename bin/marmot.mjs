@@ -385,7 +385,7 @@ if (cmd === "doctor") {
   // A notification that is accepted and silently dropped is worse than none,
   // so say plainly whether one would actually arrive.
   const { deliverability } = await import("../src/notify.mjs");
-  const d = deliverability();
+  const d = deliverability({ app: cfg.notify?.app ?? null });
   const notify = !cfg.notify?.desktop
     ? "off in your config"
     : d.status === "ok"

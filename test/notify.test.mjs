@@ -8,6 +8,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { notifyCommand, alert, silenced, deliverability } from "../src/notify.mjs";
 import { DEFAULTS } from "../src/config.mjs";
+import { readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 /** Collects what would have been written, in place of stderr. */
 const fakeStream = () => {
@@ -37,6 +40,40 @@ test("macOS attributes the notification to the host app when it can", () => {
   // as the terminal the user is already using is what makes it arrive.
   const c = notifyCommand("darwin", "Marmot", "a nudge", { __CFBundleIdentifier: "com.googlecode.iterm2" });
   assert.match(c.args[1], /^tell application id "com\.googlecode\.iterm2" to display notification "a nudge"/);
+});
+
+test("notify.app overrides the host, for a host that can never be granted", () => {
+  // macOS only lists apps that have registered themselves, and an app that is
+  // not listed cannot be switched on — so there has to be a way to post as one
+  // that is.
+  const byId = notifyCommand("darwin", "Marmot", "a nudge", { __CFBundleIdentifier: "com.microsoft.VSCode" }, "com.googlecode.iterm2");
+  assert.match(byId.args[1], /tell application id "com\.googlecode\.iterm2"/);
+
+  // A name rather than a bundle id is accepted too, since that is what people
+  // see in System Settings.
+  const byName = notifyCommand("darwin", "Marmot", "a nudge", {}, "Script Editor");
+  assert.match(byName.args[1], /tell application "Script Editor"/);
+});
+
+test("alert passes notify.app through", () => {
+  const s = fakeStream();
+  const did = alert(
+    { notify: { bell: false, desktop: true, app: "com.googlecode.iterm2" } },
+    { body: "a nudge", platform: "darwin", stream: s, env: { __CFBundleIdentifier: "com.microsoft.VSCode" }, ttyPath: null },
+  );
+  // The spawn may or may not succeed here; what matters is which app it named.
+  if (did.desktop) assert.match(did.desktop.args[1], /com\.googlecode\.iterm2/);
+});
+
+test("deliverability checks the overriding app, not the host", () => {
+  const d = deliverability({
+    platform: "darwin",
+    env: { __CFBundleIdentifier: "com.microsoft.VSCode", HOME: "/home/me" },
+    app: "com.googlecode.iterm2",
+    run: () => "<plist>com.googlecode.iterm2</plist>",
+  });
+  assert.equal(d.status, "ok");
+  assert.equal(d.deliverer, "com.googlecode.iterm2");
 });
 
 test("with no host app it falls back to a plain notification", () => {
@@ -116,30 +153,49 @@ test("a multi-line detail is flattened and capped", () => {
 
 test("the bell goes to the given stream, never stdout", () => {
   const s = fakeStream();
-  const did = alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: s, env: quiet });
+  const did = alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: s, env: quiet, ttyPath: null });
   assert.deepEqual(s.written, ["\x07"]);
-  assert.equal(did.bell, true);
+  assert.equal(did.bell, "stderr");
   assert.equal(did.desktop, null);
+});
+
+test("the bell prefers the real terminal over a piped stderr", (t) => {
+  // A hook's stderr is a pipe Claude Code reads, so a bell written there never
+  // reaches the terminal. /dev/tty is the only place it can actually ring.
+  const s = fakeStream();
+  const tmp = join(tmpdir(), `marmot-tty-${Date.now()}`);
+  const did = alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: s, env: quiet, ttyPath: tmp });
+  assert.equal(did.bell, "tty");
+  assert.deepEqual(s.written, [], "and stderr is left alone when the terminal took it");
+  assert.equal(readFileSync(tmp, "utf8"), "\x07");
+  rmSync(tmp, { force: true });
+});
+
+test("the bell falls back to stderr when there is no terminal", () => {
+  const s = fakeStream();
+  const did = alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: s, env: quiet, ttyPath: "/nonexistent/dir/tty" });
+  assert.equal(did.bell, "stderr");
+  assert.deepEqual(s.written, ["\x07"]);
 });
 
 test("the bell can be turned off on its own", () => {
   const s = fakeStream();
-  const did = alert({ notify: { bell: false, desktop: false } }, { body: "a nudge", stream: s, env: quiet });
+  const did = alert({ notify: { bell: false, desktop: false } }, { body: "a nudge", stream: s, env: quiet, ttyPath: null });
   assert.deepEqual(s.written, []);
   assert.equal(did.bell, false);
 });
 
 test("the desktop notification can be turned off on its own", () => {
   const s = fakeStream();
-  const did = alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", platform: "darwin", stream: s, env: quiet });
-  assert.equal(did.bell, true);
+  const did = alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", platform: "darwin", stream: s, env: quiet, ttyPath: null });
+  assert.equal(did.bell, "stderr");
   assert.equal(did.desktop, null, "no notification was raised");
 });
 
 test("no notify config at all is silent rather than a crash", () => {
   const s = fakeStream();
-  assert.doesNotThrow(() => alert({}, { body: "a nudge", stream: s, env: quiet }));
-  assert.doesNotThrow(() => alert(undefined, { body: "a nudge", stream: s, env: quiet }));
+  assert.doesNotThrow(() => alert({}, { body: "a nudge", stream: s, env: quiet, ttyPath: null }));
+  assert.doesNotThrow(() => alert(undefined, { body: "a nudge", stream: s, env: quiet, ttyPath: null }));
   assert.deepEqual(s.written, []);
 });
 
@@ -150,7 +206,7 @@ test("MARMOT_NO_NOTIFY and CI silence both channels", () => {
 
   for (const env of [{ MARMOT_NO_NOTIFY: "1" }, { CI: "true" }]) {
     const s = fakeStream();
-    const did = alert(DEFAULTS, { body: "a nudge", platform: "darwin", stream: s, env });
+    const did = alert(DEFAULTS, { body: "a nudge", platform: "darwin", stream: s, env, ttyPath: null });
     assert.deepEqual(s.written, [], "no bell when silenced");
     assert.equal(did.desktop, null, "no popup when silenced");
   }
@@ -158,12 +214,12 @@ test("MARMOT_NO_NOTIFY and CI silence both channels", () => {
 
 test("a stream that throws does not take the nudge down with it", () => {
   const bad = { write: () => { throw new Error("EPIPE"); } };
-  assert.doesNotThrow(() => alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: bad, env: quiet }));
+  assert.doesNotThrow(() => alert({ notify: { bell: true, desktop: false } }, { body: "a nudge", stream: bad, env: quiet, ttyPath: null }));
 });
 
 test("an unwritable platform still rings the bell", () => {
   const s = fakeStream();
-  const did = alert(DEFAULTS, { body: "a nudge", platform: "win32", stream: s, env: quiet });
-  assert.equal(did.bell, true, "Windows gets the bell even without a popup");
+  const did = alert(DEFAULTS, { body: "a nudge", platform: "win32", stream: s, env: quiet, ttyPath: null });
+  assert.equal(did.bell, "stderr", "Windows gets the bell even without a popup");
   assert.equal(did.desktop, null);
 });
