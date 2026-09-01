@@ -26,7 +26,7 @@ Node 18+, zero dependencies, entirely local. Works on **all Claude plans**.
 
 ---
 
-## Install
+## Quick install
 
 ```bash
 npm install -g github:DrDroidLab/marmot   # installs the `marmot` command
@@ -35,82 +35,7 @@ marmot init --hooks                       # wires up the nudges
 
 Then **restart Claude Code**.
 
-### Check it worked
-
-```bash
-marmot doctor
-```
-
-```
-  Root            /Users/you/.claude
-  Plan            Max 20×
-  Sessions        57 in 30 days
-  Thresholds      /Users/you/.claude/marmot.json
-  Priced turns    14,401 of 14,401
-  Nudge hooks     SessionStart, Stop
-  Notifications   on · iTerm2 posts them itself, with nothing to allow
-```
-
-Three lines to read:
-
-- **`Nudge hooks`** must say `SessionStart, Stop`. Anything else names the
-  problem — `not installed`, `Stop missing`, or `points at a missing file` if a
-  hook still refers to an install that has been removed. The fix in every case
-  is `marmot init --hooks`.
-- **`Plan`** confirms it can see your subscription, which is what the limit
-  nudges are measured against.
-- **`Notifications`** names the channel a nudge would actually arrive on.
-
-If `marmot` is not found at all, npm's global bin directory is not on your PATH —
-`npm bin -g` prints it.
-
-Nothing is published to npm yet — npm installs straight from the repository, and
-there are no dependencies to fetch, so it takes a few seconds. `marmot` is then
-on your PATH for every terminal and every coding-agent session on the machine.
-
-> **Installing this with a coding agent?** Give it both commands above. The
-> second one edits `~/.claude/settings.json`, so an agent may reasonably stop
-> and ask first. It is safe to run unattended, and here is exactly why:
->
-> - It **appends two entries** — `SessionStart` and `Stop` — and changes nothing
->   else in the file. Your statusline, permissions and other hooks are untouched.
-> - It **copies the file first** to `settings.json.marmot-backup` before writing.
-> - It is **idempotent**: run it twice and the second run reports there is
->   nothing to do.
-> - It is **reversible in one command**: `marmot init --hooks --remove`, which
->   takes out only Marmot's own entries.
-> - It **refuses rather than overwrites** if the file is not valid JSON.
->
-> To see the change before making it: `marmot init --hooks --dry-run` prints
-> what it would do and writes nothing.
-
-Preview or undo it at any time:
-
-```bash
-marmot init --hooks --dry-run   # print what would change, write nothing
-marmot init --hooks --remove    # take Marmot's hooks back out
-```
-
-What the hooks give you:
-
-- **Live nudges** at the end of a turn, for the rules in `live` — the ones you
-  can still act on. Once per rule, again at each doubling for cost, with a bell
-  and a desktop notification so they do not scroll past.
-- **A daily digest** on your first session each day: what yesterday cost, and
-  what it flagged.
-
-**The statusline** is a separate opt-in, since it replaces whatever you have:
-
-```bash
-marmot init --statusline
-```
-
-```
-$12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
-```
-
-The `▲` appears once you're past your own caps — the cheapest possible reminder,
-always in view.
+If you get stuck, drop a message on [Discord](https://discord.gg/AQ3tusPtZn).
 
 ---
 
@@ -146,6 +71,87 @@ of what it looks for:
 
 Every rule is deterministic and local. **No model decides whether to nudge
 you**, and every threshold is yours to move.
+
+---
+
+## Usage
+
+| Command | What it does |
+|---|---|
+| `marmot` | Nudges, plus the window they came from |
+| `marmot config` | Open the thresholds file; `config set k=v` changes one |
+| `marmot browse` | Build the session browser page and open it |
+| `marmot nudges` | Just the nudges, nothing else |
+| `marmot sessions` | One line per session |
+| `marmot mcp-audit` | Measure what each MCP server's tool definitions cost |
+| `marmot doctor` | What's readable on this machine, and what isn't |
+| `marmot init` | Write the thresholds file; `--hooks` and `--statusline` install those |
+
+`marmot` is the one to reach for, and every flag below works on it —
+`marmot --days 7`. `nudges` is the same findings with the reporting stripped
+out, which is what you want in a script or a pre-commit hook.
+
+| Flag | |
+|---|---|
+| `--days N` | Window, default 30 |
+| `--sessions` | Add the per-session list to the report |
+| `--demo` | Synthetic data, safe for screenshots |
+| `--json` | Machine-readable |
+| `--root DIR` | Claude Code home, default `~/.claude` |
+| `--session ID` | `browse`: just this one |
+| `--limit N` | `browse`: most recent N, default 25 |
+| `--no-text` | `browse`: counts and tool names only, no prompts |
+| `--browse` | Build and open the page even when output is piped |
+| `--no-browse` | Never build or open it |
+| `--no-audit` | Skip measuring MCP servers this run |
+| `--no-refresh` | Skip refreshing plan limits this run |
+
+### Chasing a nudge to its source
+
+Run `marmot` at a terminal and it builds the page and opens it. Run it with the
+output piped — from a script, a cron job, or a coding agent — and it stays in
+the terminal, because writing a multi-megabyte page and taking over the display
+is not what those callers asked for. `--browse` forces it either way,
+`--no-browse` never.
+
+Each run writes a **new file**, stamped to the minute, so the browser can never
+serve you a cached copy of an earlier one. The five most recent are kept and
+older ones removed — a page of 25 real sessions is a few megabytes.
+
+One self-contained HTML file, written locally — no CDN, no network, no web fonts.
+
+It opens on **the same figures as the report** — spend, tokens, cache, baseline context, your plan's live limit percentages, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. Models, skills and MCP calls each get a stacked column per day across the window, which answers what a total cannot: whether something is a habit or a one-off, and which server has no bar at all. From there each session opens onto its full timeline — every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle — which is how you find the turn where a session started getting expensive.
+
+![The session browser](docs/browse-index.png)
+
+![A single session](docs/browse-session.png)
+
+### Finding the cheapest saving you have
+
+Idle MCP servers are usually the largest single win, because their cost is paid
+on *every* request rather than once. Nothing on disk records how big those tool
+definitions are, so Marmot asks the servers directly:
+
+```bash
+marmot mcp-audit
+```
+
+```
+  Server                   Tools    Tokens    Calls (30d)
+  github                      26     ~4.1K            142
+  kubernetes                  28     ~5.2K             18
+  sentry                      14     ~2.3K              0  ▲
+  datadog                     22     ~3.6K              0  ▲
+
+  15,200 tokens of tool definitions ride on every request.
+  ~5,900 of them (39%) belong to 2 servers you have not called in 30 days:
+  sentry, datadog
+```
+
+The report does this for you when it has no recent figures, and caches the
+result for a week. It is the only thing Marmot does that **starts your servers**
+rather than reading a file — `mcp.autoAudit: false` or `--no-audit` keeps it
+read-only. `--tools` breaks it down per tool.
 
 ## When it reaches you
 
@@ -264,86 +270,83 @@ Spend is a **shadow price**: what these tokens would have cost at published API
 rates, not an invoice line. Right for comparing your own sessions to each
 other, wrong for finance.
 
----
-
-## Usage
-
-| Command | What it does |
-|---|---|
-| `marmot` | Nudges, plus the window they came from |
-| `marmot config` | Open the thresholds file; `config set k=v` changes one |
-| `marmot browse` | Build the session browser page and open it |
-| `marmot nudges` | Just the nudges, nothing else |
-| `marmot sessions` | One line per session |
-| `marmot mcp-audit` | Measure what each MCP server's tool definitions cost |
-| `marmot doctor` | What's readable on this machine, and what isn't |
-| `marmot init` | Write the thresholds file; `--hooks` and `--statusline` install those |
-
-`marmot` is the one to reach for, and every flag below works on it —
-`marmot --days 7`. `nudges` is the same findings with the reporting stripped
-out, which is what you want in a script or a pre-commit hook.
-
-| Flag | |
-|---|---|
-| `--days N` | Window, default 30 |
-| `--sessions` | Add the per-session list to the report |
-| `--demo` | Synthetic data, safe for screenshots |
-| `--json` | Machine-readable |
-| `--root DIR` | Claude Code home, default `~/.claude` |
-| `--session ID` | `browse`: just this one |
-| `--limit N` | `browse`: most recent N, default 25 |
-| `--no-text` | `browse`: counts and tool names only, no prompts |
-| `--browse` | Build and open the page even when output is piped |
-| `--no-browse` | Never build or open it |
-| `--no-audit` | Skip measuring MCP servers this run |
-| `--no-refresh` | Skip refreshing plan limits this run |
-
-### Chasing a nudge to its source
-
-Run `marmot` at a terminal and it builds the page and opens it. Run it with the
-output piped — from a script, a cron job, or a coding agent — and it stays in
-the terminal, because writing a multi-megabyte page and taking over the display
-is not what those callers asked for. `--browse` forces it either way,
-`--no-browse` never.
-
-Each run writes a **new file**, stamped to the minute, so the browser can never
-serve you a cached copy of an earlier one. The five most recent are kept and
-older ones removed — a page of 25 real sessions is a few megabytes.
-
-One self-contained HTML file, written locally — no CDN, no network, no web fonts.
-
-It opens on **the same figures as the report** — spend, tokens, cache, baseline context, your plan's live limit percentages, the model split, skills, MCP servers and every nudge — because they are computed once in Node and shipped with the page rather than recalculated in the browser. Models, skills and MCP calls each get a stacked column per day across the window, which answers what a total cannot: whether something is a habit or a one-off, and which server has no bar at all. From there each session opens onto its full timeline — every prompt, reply and tool call, with a cost-per-turn chart, the token split, a text filter and an errors-only toggle — which is how you find the turn where a session started getting expensive.
-
-![The session browser](docs/browse-index.png)
-
-![A single session](docs/browse-session.png)
-
-### Finding the cheapest saving you have
-
-Idle MCP servers are usually the largest single win, because their cost is paid
-on *every* request rather than once. Nothing on disk records how big those tool
-definitions are, so Marmot asks the servers directly:
+## Check it worked
 
 ```bash
-marmot mcp-audit
+marmot doctor
 ```
 
 ```
-  Server                   Tools    Tokens    Calls (30d)
-  github                      26     ~4.1K            142
-  kubernetes                  28     ~5.2K             18
-  sentry                      14     ~2.3K              0  ▲
-  datadog                     22     ~3.6K              0  ▲
-
-  15,200 tokens of tool definitions ride on every request.
-  ~5,900 of them (39%) belong to 2 servers you have not called in 30 days:
-  sentry, datadog
+  Root            /Users/you/.claude
+  Plan            Max 20×
+  Sessions        57 in 30 days
+  Thresholds      /Users/you/.claude/marmot.json
+  Priced turns    14,401 of 14,401
+  Nudge hooks     SessionStart, Stop
+  Notifications   on · iTerm2 posts them itself, with nothing to allow
 ```
 
-The report does this for you when it has no recent figures, and caches the
-result for a week. It is the only thing Marmot does that **starts your servers**
-rather than reading a file — `mcp.autoAudit: false` or `--no-audit` keeps it
-read-only. `--tools` breaks it down per tool.
+Three lines to read:
+
+- **`Nudge hooks`** must say `SessionStart, Stop`. Anything else names the
+  problem — `not installed`, `Stop missing`, or `points at a missing file` if a
+  hook still refers to an install that has been removed. The fix in every case
+  is `marmot init --hooks`.
+- **`Plan`** confirms it can see your subscription, which is what the limit
+  nudges are measured against.
+- **`Notifications`** names the channel a nudge would actually arrive on.
+
+If `marmot` is not found at all, npm's global bin directory is not on your PATH —
+`npm bin -g` prints it.
+
+Nothing is published to npm yet — npm installs straight from the repository, and
+there are no dependencies to fetch, so it takes a few seconds. `marmot` is then
+on your PATH for every terminal and every coding-agent session on the machine.
+
+> **Installing this with a coding agent?** Give it both commands from the
+> install section. The second one edits `~/.claude/settings.json`, so an agent
+> may reasonably stop and ask first. It is safe to run unattended, and here is
+> exactly why:
+>
+> - It **appends two entries** — `SessionStart` and `Stop` — and changes nothing
+>   else in the file. Your statusline, permissions and other hooks are untouched.
+> - It **copies the file first** to `settings.json.marmot-backup` before writing.
+> - It is **idempotent**: run it twice and the second run reports there is
+>   nothing to do.
+> - It is **reversible in one command**: `marmot init --hooks --remove`, which
+>   takes out only Marmot's own entries.
+> - It **refuses rather than overwrites** if the file is not valid JSON.
+>
+> To see the change before making it: `marmot init --hooks --dry-run` prints
+> what it would do and writes nothing.
+
+Preview or undo it at any time:
+
+```bash
+marmot init --hooks --dry-run   # print what would change, write nothing
+marmot init --hooks --remove    # take Marmot's hooks back out
+```
+
+What the hooks give you:
+
+- **Live nudges** at the end of a turn, for the rules in `live` — the ones you
+  can still act on. Once per rule, again at each doubling for cost, with a bell
+  and a desktop notification so they do not scroll past.
+- **A daily digest** on your first session each day: what yesterday cost, and
+  what it flagged.
+
+**The statusline** is a separate opt-in, since it replaces whatever you have:
+
+```bash
+marmot init --statusline
+```
+
+```
+$12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
+```
+
+The `▲` appears once you're past your own caps — the cheapest possible reminder,
+always in view.
 
 ## Configuration
 
