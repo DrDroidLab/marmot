@@ -227,7 +227,25 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    `com.apple.ncprefs` to tell the difference, and `marmot doctor` reports it.
    Never assume a notification arrived because the command succeeded.
 
-7. **A slash command in a session whose plugin was just removed prints nothing
+7. **`display notification` cannot show an icon or stay on screen, and no
+   amount of AppleScript changes that.** It has no icon parameter — the icon is
+   whichever app posted it — and no persistence parameter; whether a banner
+   waits or fades is that app's *Alert style*, which only a human can set in
+   System Settings. The obvious fix is an app bundle, and it does not work: an
+   afternoon established that `open -a` **will not run an AppleScript applet**
+   with arguments (a probe applet writing a marker file never ran), and that
+   `osascript <bundle> args` does run it but posts as *osascript* — verified by
+   `com.apple.ncprefs` never gaining the bundle id. A genuine custom icon needs
+   a signed Cocoa app calling `UNUserNotificationCenter`.
+
+   `display dialog` takes `with icon POSIX file` (a **PNG** is fine — no `.icns`
+   needed, which is why `docs/marmot.png` is 14KB rather than 425KB) and waits
+   for a click. That is `dialogCommand()` in `notify.mjs`, and it is the only
+   thing on macOS that solves either problem. It is deliberately not the
+   default: something that interrupts every time gets switched off, and then the
+   nudge that mattered cannot reach you either.
+
+8. **A slash command in a session whose plugin was just removed prints nothing
    at all.** `${CLAUDE_PLUGIN_ROOT}` empties, the command becomes
    `node "/bin/marmot.mjs"`, node writes *Cannot find module* to stderr, and the
    slash command surfaces an empty result — it reads as "the report is broken"
@@ -236,7 +254,7 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    anything. `claude plugin list` also keeps reporting the old state until then,
    including `✔ enabled` for a plugin you have just uninstalled.
 
-8. **`claude plugin install` has no `--force`.** To pick up changes:
+9. **`claude plugin install` has no `--force`.** To pick up changes:
    ```bash
    claude plugin marketplace update marmot
    claude plugin uninstall marmot && claude plugin install marmot@marmot
@@ -252,7 +270,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 297 tests, node:test, no dependencies
+npm test        # 332 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:

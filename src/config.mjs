@@ -151,8 +151,21 @@ export const DEFAULTS = {
     // Keep the notification up until you dismiss it, where the platform allows
     // it: critical urgency on Linux, a long-lived balloon on Windows. macOS
     // gives `display notification` no say — there it is the Alert style you set
-    // for the posting app, and `marmot doctor` says where.
+    // for the posting app, and `marmot doctor` says where. A dialog, below,
+    // sidesteps all of that.
     persist: true,
+    // Banner or dialog.
+    //
+    //   auto    a banner, except for the nudge that says you are about to run
+    //           out — the last mark before a limit, and a window burning faster
+    //           than it refills. Those get a dialog.
+    //   alert   always a dialog: it carries the marmot, holds three lines
+    //           rather than one, and waits for a click.
+    //   banner  never a dialog, whatever it says.
+    //
+    // On Linux a dialog is neither needed nor used: a critical notification
+    // there already shows the icon and already never expires.
+    style: "auto",
   },
 
   // Each run writes a new page, so the browser can never show you a cached

@@ -46,6 +46,16 @@ The desktop notification stays short. Claude Code gets the evidence and the
 next action in its transcript. Marmot speaks once per rule instead of repeating
 the same warning after every turn.
 
+The last mark before a limit is different. A banner you were not looking at is a
+banner you missed, and at 90% there is no next one — so that nudge arrives as a
+dialog that carries the marmot, has room for what to do about it, and waits
+until you dismiss it. Everything before it stays a banner.
+
+```bash
+marmot test-notification --alert     # see it without nearly running out
+marmot config set notify.style=banner   # never; alert = always
+```
+
 ## See where the tokens went
 
 ```bash
@@ -302,8 +312,10 @@ a nudge instead of creating a second, duplicated alarm.
 
   "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
+  // style: "auto" is a dialog for the last mark before a limit
+  // and a banner for everything else. "alert" always, "banner" never.
   "notify": { "desktop": true, "bell": true, "app": null,
-              "sound": "Ping", "persist": true },
+              "sound": "Ping", "persist": true, "style": "auto" },
 
   "digest": { "cadence": "daily" },
 
@@ -378,6 +390,15 @@ marmot test-notification
 
 If the test does not appear, check Focus or Do Not Disturb first. Then run
 `marmot doctor` to see which notification path Marmot is using.
+
+Banners fade on their own, and on macOS how long they last is the Alert style of
+whichever app posts them — not something Marmot can set. If they go past too
+fast, either set that app to *Alerts* in System Settings → Notifications, or
+have every nudge arrive as a dialog instead:
+
+```bash
+marmot config set notify.style=alert
+```
 
 Keep transcript nudges while disabling desktop notifications or sound:
 
