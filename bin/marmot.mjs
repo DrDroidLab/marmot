@@ -721,11 +721,13 @@ function diagnoseContext(session) {
   };
 }
 
+const DIAGNOSE = diagnoseContext(sessions.slice().sort((a, b) => b.cost - a.cost)[0] ?? null);
+
 const nudges = evaluate(sessions, cfg, {
   root: ROOT,
   plan: PLAN,
   attribution: ATTRIBUTION,
-  diagnose: diagnoseContext(sessions.slice().sort((a, b) => b.cost - a.cost)[0] ?? null),
+  diagnose: DIAGNOSE,
   cwd: DEMO ? null : process.cwd(),
   configured: DEMO ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, WINDOW_DIRS),
   mcpSizes: MCP_SIZES,
@@ -837,7 +839,7 @@ if (cmd === "sessions") {
 const SKILL_SIZES = DEMO
   ? (await import("../src/demo.mjs")).demoSkillSizes
   : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
-process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN, attribution: ATTRIBUTION, serverConfigs: SERVER_CONFIGS }));
+process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN, attribution: ATTRIBUTION, serverConfigs: SERVER_CONFIGS, diagnose: DIAGNOSE }));
 
 // `--sessions` adds every session under the report; the page follows unless
 // `--no-browse`. One command, the numbers and somewhere to dig in.

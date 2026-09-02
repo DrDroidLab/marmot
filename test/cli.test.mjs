@@ -163,7 +163,7 @@ test("the file config writes is one loadConfig accepts", async (t) => {
   const cfg = loadConfig(root);
   assert.equal(cfg._exists, true);
   assert.equal(cfg.session.costCap, 25);
-  assert.deepEqual(cfg.live, ["session-cost", "daily-cost", "daily-baseline", "session-turns", "limit-reached"]);
+  assert.deepEqual(cfg.live, ["limit-reached", "session-cost", "daily-cost", "daily-baseline"]);
 });
 
 test("report --sessions folds the per-session list into the report", (t) => {

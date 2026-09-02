@@ -18,7 +18,7 @@ export const DEFAULTS = {
   // Rules that may interrupt you mid-session, at the end of an assistant turn.
   // Everything else is saved for the digest — a nudge you cannot act on right
   // now is an interruption, not a nudge.
-  live: ["session-cost", "daily-cost", "daily-baseline", "session-turns", "limit-reached"],
+  live: ["limit-reached", "session-cost", "daily-cost", "daily-baseline"],
 
   // What a mid-session interruption is allowed to cost you. Four budgets with
   // four marks each is sixteen possible interruptions, which would undo the

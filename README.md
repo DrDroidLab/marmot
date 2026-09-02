@@ -104,6 +104,23 @@ Run `marmot --help` for the complete reference.
 
 Every check is deterministic. No model decides whether to nudge you.
 
+Most of those are **causes rather than alarms**. What interrupts you is a
+threshold — half, three quarters, then nine tenths of a plan window — and the
+nudge carries whichever cause best explains getting there, quantified:
+
+```
+▲ 75% of your weekly limit
+  76% of your weekly limit is gone on Max 20×. It resets in 2.1d.
+  Each turn re-sends 603K tokens of history, over 57 prompts and 3.8d.
+  Run /compact, or start a new session for the next distinct piece of work.
+```
+
+Causes are ranked by how much each explains, how confident Marmot is, and how
+cheaply it can be fixed — a setting beats a habit at the same share. `marmot`
+prints that ranking under **Why it is going**, scores included, so the choice
+can be argued with. When nothing scores highly enough, the nudge still fires
+with the threshold alone rather than an invented reason.
+
 ## Configuration
 
 The defaults are deliberately quiet, so configuration is optional. If a rule

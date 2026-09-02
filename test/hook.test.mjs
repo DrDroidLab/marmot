@@ -79,15 +79,15 @@ test("a live nudge speaks once, then holds until the cost doubles", (t) => {
 test("only rules listed in `live` may interrupt mid-session", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
-  // cache-hit is a digest rule, never a live one. Configure a session that
-  // would trip it and confirm the hook stays silent about it.
-  writeFileSync(join(root, "marmot.json"), JSON.stringify({ live: ["cache-hit"], session: { costCap: 999999 } }));
+  // `live` is the whole gate on interrupting: a rule listed there speaks, and
+  // one that is not stays for the digest however loudly it applies.
+  writeFileSync(join(root, "marmot.json"), JSON.stringify({ live: ["session-cost"], session: { costCap: 1 } }));
   const entries = [prompt("go")];
   for (let i = 0; i < 30; i += 1) entries.push(response({ id: `m${i}`, u: usage({ input: 100_000, output: 1000, cacheRead: 1000 }), text: "x" }));
   const f = writeSession(root, { id: "lowcache", entries });
 
   const msg = message(fire(root, { hook_event_name: "Stop", transcript_path: f.path }));
-  assert.match(msg, /cache/i, "a rule the user put in `live` should fire");
+  assert.match(msg, /cost cap/i, "a rule the user put in `live` should fire");
 });
 
 test("a missing or unreadable transcript is not an error", (t) => {
