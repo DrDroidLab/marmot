@@ -19,6 +19,17 @@ export const DEFAULTS = {
   // Everything else is saved for the digest — a nudge you cannot act on right
   // now is an interruption, not a nudge.
   live: ["session-cost", "daily-cost", "daily-baseline", "session-turns", "limit-reached"],
+
+  // What a mid-session interruption is allowed to cost you. Four budgets with
+  // four marks each is sixteen possible interruptions, which would undo the
+  // point of having them: one at a time, and not again for a while.
+  interrupt: {
+    // Minutes of quiet after a live nudge before another may fire.
+    minGapMins: 20,
+    // How many findings one notification may carry. The rest wait for the
+    // digest rather than stacking popups.
+    maxPerNudge: 1,
+  },
   digest: { cadence: "daily" },
 
   session: {
