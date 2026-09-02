@@ -174,7 +174,9 @@ var pct = function(n){ return n==null?"—":Math.round(n*100)+"%"; };
 var esc = function(s){ var d=document.createElement("div"); d.textContent=s==null?"":String(s); return d.innerHTML; };
 var clock = function(t){ if(!t) return ""; var d=new Date(t); return d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); };
 
-document.getElementById("scope").textContent = S.length+" sessions · last "+D.days+" days · "+D.root;
+var PLAN_NAME=(D.summary&&D.summary.plan&&D.summary.plan.plan)||null;
+document.getElementById("scope").textContent =
+  S.length+" sessions · last "+D.days+" days"+(PLAN_NAME?" · "+PLAN_NAME:"")+" · "+D.root;
 document.getElementById("privacy").textContent = D.redacted
   ? "Generated locally. Prompt and response text was redacted with --no-text; only counts, tool names and inputs are here."
   : "Generated locally and never uploaded. This file contains your raw prompts and responses — treat it like the transcript it came from.";
@@ -331,18 +333,7 @@ function summaryPanels(){
   var Z=D.summary; if(!Z||!Z.totals) return "";
   var M=Z.totals, out="";
 
-  var P=Z.projects||[];
-  if(P.length>1){
-    var maxCost=P[0].cost||1;
-    out+='<div class="panel"><h2>By project</h2><p class="cap">Each working directory is its own setup, with its own MCP servers and skills. Every nudge below is computed across all of them.</p><div class="barlist">'
-      +P.map(function(r){
-        var w=maxCost?(r.cost/maxCost*100):0;
-        var name=r.dir.split("/").slice(-2).join("/");
-        return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"></u><s>'+esc(name)+(r.scoped&&r.scoped.length?" · +"+esc(r.scoped.join(", ")):"")+'</s></div>'
-          +'<div class="ct">'+usd(r.cost)+" · "+num(r.sessions)+" sess · "+num(r.prompts)+' prompts</div></div>';
-      }).join("")+'</div></div>';
-  }
-
+  out+='<div class="grouphead">Worth acting on</div>';
   var PL=Z.plan;
   if(PL&&PL.limits&&PL.limits.length){
     var live=PL.limits.filter(function(l){ return !l.expired && (l.active||l.resetsAt); });
@@ -365,12 +356,60 @@ function summaryPanels(){
     }
   }
 
+  var N=Z.nudges||{};
+  var all=(N.windowNudges||[]).map(function(w){ return {label:w.label,detail:w.detail,action:w.action,hits:null}; })
+    .concat((N.sessionNudges||[]).map(function(g){ return {label:g.label,detail:null,action:null,hits:g.hits}; }));
+  if(all.length){
+    out+='<div class="panel"><h2>'+num(all.length)+" thing"+(all.length===1?"":"s")+' worth knowing</h2>'
+      +'<p class="cap">Deterministic rules over this window — no model decided any of these. The thresholds are yours, in ~/.claude/marmot.json.</p>'
+      +all.map(function(n){
+        var body="";
+        if(n.detail) body='<p>'+esc(n.detail)+'</p><div class="act">'+esc(n.action||"")+'</div>';
+        else if(n.hits&&n.hits.length){
+          body=n.hits.slice(0,3).map(function(h){
+            var s=h.session||{};
+            return '<p>'+esc(h.detail)+'</p><div class="who">'+esc(String(s.id||"").slice(0,8))+" · "+esc(s.day||"")+" · "+esc((s.cwd||"").split("/").slice(-2).join("/"))+'</div>';
+          }).join("")
+          +(n.hits.length>3?'<div class="who">…and '+(n.hits.length-3)+' more</div>':"")
+          +'<div class="act" style="margin-top:6px">'+esc(n.hits[0].action||"")+'</div>';
+        }
+        return '<div class="nudge"><h3>'+esc(n.label)+(n.hits&&n.hits.length>1?" · "+n.hits.length+" sessions":"")+'</h3>'+body+'</div>';
+      }).join("")+'</div>';
+  }
+  var errs=M.toolErrorsByName||{}, errNames=Object.keys(errs);
+  if(errNames.length){
+    var rows=errNames.map(function(n){ return {name:n, errors:errs[n], calls:(M.toolCallsByName||{})[n]||errs[n]}; })
+      .sort(function(a,b){ return b.errors-a.errors || (b.errors/b.calls)-(a.errors/a.calls); }).slice(0,10);
+    var maxErr=rows[0].errors||1;
+    out+='<div class="panel"><h2>Tools failing</h2><p class="cap">Every failure is paid for twice — once to fail, once to retry. A tool failing every time is a wrong path or a missing permission, not bad luck.</p><div class="barlist">'
+      +rows.map(function(r){
+        var rate=r.errors/r.calls;
+        return '<div class="barrow"><div class="lbl"><u style="width:'+(r.errors/maxErr*100).toFixed(1)+'%;background:var(--danger);opacity:.28"></u><s'+(rate>=0.5?' class="idle"':'')+'>'+esc(r.name)+'</s></div>'
+          +'<div class="ct">'+num(r.errors)+" of "+num(r.calls)+" · "+pct(rate)+'</div></div>';
+      }).join("")+'</div></div>';
+  }
+
+  out+='<div class="grouphead">Where it went</div>';
+  var P=Z.projects||[];
+  if(P.length>1){
+    var maxCost=P[0].cost||1;
+    out+='<div class="panel"><h2>By project</h2><p class="cap">Each working directory is its own setup, with its own MCP servers and skills. Every nudge below is computed across all of them.</p><div class="barlist">'
+      +P.map(function(r){
+        var w=maxCost?(r.cost/maxCost*100):0;
+        var name=r.dir.split("/").slice(-2).join("/");
+        return '<div class="barrow"><div class="lbl"><u style="width:'+w.toFixed(1)+'%"></u><s>'+esc(name)+(r.scoped&&r.scoped.length?" · +"+esc(r.scoped.join(", ")):"")+'</s></div>'
+          +'<div class="ct">'+usd(r.cost)+" · "+num(r.sessions)+" sess · "+num(r.prompts)+' prompts</div></div>';
+      }).join("")+'</div></div>';
+  }
+
+
   var days=seriesByDay();
   out+=stackedByDay("Spend by day","Modelled at published rates, day by day across the window.",days,["spend"],function(d){return d.cost;},usd);
   out+=stackedByDay("Model tokens by day","Which model the window's tokens went to, day by day.",days,topKeys(days,"models",6),function(d,k){return d.models[k];},tok);
   out+=stackedByDay("Skills by day","How often each skill loaded. A habit looks different from a one-off.",days,topKeys(days,"skills",6),function(d,k){return d.skills[k];});
   out+=stackedByDay("MCP calls by day","Calls per server. A server with no bar all window is one you pay for on every request and never use.",days,topKeys(days,"mcp",6),function(d,k){return d.mcp[k];});
 
+  out+='<div class="grouphead">Breakdowns</div>';
   var models=Object.keys(M.models||{}).map(function(m){return [m,M.models[m]];}).sort(function(a,b){return b[1]-a[1];});
   if(models.length){
     out+='<div class="panel"><h2>Where it went</h2><p class="cap">Modelled at published rates. On a subscription plan this is a shadow price, not an invoice line.</p><div class="barlist">'
@@ -416,39 +455,6 @@ function summaryPanels(){
       }).join("")+'</div></div>';
   }
 
-  var errs=M.toolErrorsByName||{}, errNames=Object.keys(errs);
-  if(errNames.length){
-    var rows=errNames.map(function(n){ return {name:n, errors:errs[n], calls:(M.toolCallsByName||{})[n]||errs[n]}; })
-      .sort(function(a,b){ return b.errors-a.errors || (b.errors/b.calls)-(a.errors/a.calls); }).slice(0,10);
-    var maxErr=rows[0].errors||1;
-    out+='<div class="panel"><h2>Tools failing</h2><p class="cap">Every failure is paid for twice — once to fail, once to retry. A tool failing every time is a wrong path or a missing permission, not bad luck.</p><div class="barlist">'
-      +rows.map(function(r){
-        var rate=r.errors/r.calls;
-        return '<div class="barrow"><div class="lbl"><u style="width:'+(r.errors/maxErr*100).toFixed(1)+'%;background:var(--danger);opacity:.28"></u><s'+(rate>=0.5?' class="idle"':'')+'>'+esc(r.name)+'</s></div>'
-          +'<div class="ct">'+num(r.errors)+" of "+num(r.calls)+" · "+pct(rate)+'</div></div>';
-      }).join("")+'</div></div>';
-  }
-
-  var N=Z.nudges||{};
-  var all=(N.windowNudges||[]).map(function(w){ return {label:w.label,detail:w.detail,action:w.action,hits:null}; })
-    .concat((N.sessionNudges||[]).map(function(g){ return {label:g.label,detail:null,action:null,hits:g.hits}; }));
-  if(all.length){
-    out+='<div class="panel"><h2>'+num(all.length)+" thing"+(all.length===1?"":"s")+' worth knowing</h2>'
-      +'<p class="cap">Deterministic rules over this window — no model decided any of these. The thresholds are yours, in ~/.claude/marmot.json.</p>'
-      +all.map(function(n){
-        var body="";
-        if(n.detail) body='<p>'+esc(n.detail)+'</p><div class="act">'+esc(n.action||"")+'</div>';
-        else if(n.hits&&n.hits.length){
-          body=n.hits.slice(0,3).map(function(h){
-            var s=h.session||{};
-            return '<p>'+esc(h.detail)+'</p><div class="who">'+esc(String(s.id||"").slice(0,8))+" · "+esc(s.day||"")+" · "+esc((s.cwd||"").split("/").slice(-2).join("/"))+'</div>';
-          }).join("")
-          +(n.hits.length>3?'<div class="who">…and '+(n.hits.length-3)+' more</div>':"")
-          +'<div class="act" style="margin-top:6px">'+esc(n.hits[0].action||"")+'</div>';
-        }
-        return '<div class="nudge"><h3>'+esc(n.label)+(n.hits&&n.hits.length>1?" · "+n.hits.length+" sessions":"")+'</h3>'+body+'</div>';
-      }).join("")+'</div>';
-  }
   return out;
 }
 
@@ -466,16 +472,24 @@ function renderIndex(){
   // report and shipped in the payload, so the two cannot disagree.
   var M=(D.summary&&D.summary.totals)||null;
   var pp=M&&M.promptsPerSession;
-  view.innerHTML = '<div class="kpis">'
-      +kpi("Spend",usd(tot.cost),"published rates")
+  // Ordered by what a reader needs first: what is running out, then what it
+  // cost, then how the work was shaped. Drill-down lives further down the page.
+  var quota=planKpis();
+  view.innerHTML =
+    (quota?'<div class="grouphead">What is running out</div><div class="kpis">'+quota+'</div>':"")
+    +'<div class="grouphead">What it cost</div>'
+    +'<div class="kpis">'
+      +kpi(PLAN_NAME?"Modelled spend":"Spend",usd(tot.cost),PLAN_NAME?"at API rates \u2014 not a bill on "+PLAN_NAME:"published rates")
+      +kpi("Tokens",M?tok(M.tok):"\u2014","input, output and cache")
+      +kpi("Cache hit rate",M&&M.cacheHitRate!=null?pct(M.cacheHitRate):"\u2014","higher is cheaper")
+      +(M&&M.baseline!=null?kpi("Baseline context",tok(M.baseline),"every request, before you type"):"")
+    +'</div>'
+    +'<div class="grouphead">How you worked</div>'
+    +'<div class="kpis">'
       +kpi("Sessions",num(S.length))
-      +kpi("Prompts",num(tot.p),pp?(pp.mean.toFixed(1)+" mean · "+num(pp.median)+" median · "+num(pp.p99)+" p99"):"you typed")
+      +kpi("Prompts",num(tot.p),pp?(pp.mean.toFixed(1)+" mean \u00b7 "+num(pp.median)+" median \u00b7 "+num(pp.p99)+" p99"):"you typed")
       +kpi("Model turns",num(tot.t),tot.p?((tot.t/tot.p).toFixed(1)+" per prompt"):"")
-      +kpi("Tokens",M?tok(M.tok):"—","input, output and cache")
-      +kpi("Cache hit rate",M&&M.cacheHitRate!=null?pct(M.cacheHitRate):"—","higher is cheaper")
       +kpi("Tool calls",num(tot.tc),M&&M.toolCalls?pct(M.toolErrors/M.toolCalls)+" failed":"")
-      +(M&&M.baseline!=null?kpi("Baseline context",tok(M.baseline),"before you type"):"")
-      +planKpis()
     +'</div>'
     +summaryPanels()
     +'<div class="tablewrap"><table><thead><tr>'
