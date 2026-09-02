@@ -154,18 +154,24 @@ export const DEFAULTS = {
     // for the posting app, and `marmot doctor` says where. A dialog, below,
     // sidesteps all of that.
     persist: true,
-    // Banner or dialog.
+    // Banner or dialog. A nudge is a warning, and a warning that fades while
+    // you are looking at another window did not happen — so a dialog is the
+    // default: it carries the marmot, has room for what to do about it as well
+    // as what it cost, and waits until you dismiss it.
     //
-    //   auto    a banner, except for the nudge that says you are about to run
-    //           out — the last mark before a limit, and a window burning faster
-    //           than it refills. Those get a dialog.
-    //   alert   always a dialog: it carries the marmot, holds three lines
-    //           rather than one, and waits for a click.
+    //   alert   a dialog, always. The default.
+    //   auto    a dialog only for the nudge that says you are about to run out
+    //           — the last mark before a limit, and a window burning faster
+    //           than it refills. Everything else is a banner.
     //   banner  never a dialog, whatever it says.
+    //
+    // The daily digest is a banner under all three: it is a summary you read
+    // when you sit down, not a warning, and a box in the way of every session
+    // start is how the whole thing gets muted.
     //
     // On Linux a dialog is neither needed nor used: a critical notification
     // there already shows the icon and already never expires.
-    style: "auto",
+    style: "alert",
   },
 
   // Each run writes a new page, so the browser can never show you a cached

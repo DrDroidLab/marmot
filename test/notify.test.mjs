@@ -64,7 +64,7 @@ test("alert prefers the terminal, and says which one took it", (t) => {
   const tmp = join(tmpdir(), `marmot-osc-${Date.now()}`);
   const did = alert(
     { notify: { bell: false, desktop: true } },
-    { body: "reached $82.50", title: "Marmot", platform: "darwin", stream: s, env: { TERM_PROGRAM: "iTerm.app" }, ttyPath: tmp },
+    { body: "reached $82.50", title: "Marmot", style: "banner", platform: "darwin", stream: s, env: { TERM_PROGRAM: "iTerm.app" }, ttyPath: tmp },
   );
   assert.deepEqual(did.desktop, { via: "iTerm2" });
   assert.match(readFileSync(tmp, "utf8"), /\x1b\]9;Marmot — reached \$82\.50\x07/);
@@ -127,7 +127,7 @@ test("alert passes notify.app through", () => {
   const s = fakeStream();
   const did = alert(
     { notify: { bell: false, desktop: true, app: "com.googlecode.iterm2" } },
-    { body: "a nudge", platform: "darwin", stream: s, env: { __CFBundleIdentifier: "com.microsoft.VSCode" }, ttyPath: null },
+    { body: "a nudge", style: "banner", platform: "darwin", stream: s, env: { __CFBundleIdentifier: "com.microsoft.VSCode" }, ttyPath: null },
   );
   // The spawn may or may not succeed here; what matters is which app it named.
   if (did.desktop) assert.match(did.desktop.args[1], /com\.googlecode\.iterm2/);
@@ -158,9 +158,9 @@ test("the notification carries a sound when the bell is on", () => {
 
 test("alert asks for a sound only when the bell is configured", () => {
   const s = fakeStream();
-  const on = alert({ notify: { bell: true, desktop: true, sound: "Glass" } }, { body: "x", platform: "darwin", stream: s, env: quiet, ttyPath: null });
+  const on = alert({ notify: { bell: true, desktop: true, sound: "Glass" } }, { body: "x", style: "banner", platform: "darwin", stream: s, env: quiet, ttyPath: null });
   if (on.desktop) assert.match(on.desktop.args[1], /sound name "Glass"/);
-  const off = alert({ notify: { bell: false, desktop: true } }, { body: "x", platform: "darwin", stream: s, env: quiet, ttyPath: null });
+  const off = alert({ notify: { bell: false, desktop: true } }, { body: "x", style: "banner", platform: "darwin", stream: s, env: quiet, ttyPath: null });
   if (off.desktop) assert.doesNotMatch(off.desktop.args[1], /sound name/);
 });
 
@@ -416,14 +416,18 @@ test("a binary that is not there cannot take the process down with it", () => {
  * on the screen of whoever ran `npm test`.
  */
 
-test("a dialog is for the nudge that says you are about to run out, not the ones before it", () => {
-  // The whole design in four lines: something that interrupts every time is
-  // something you switch off, and then the last mark cannot reach you either.
-  assert.equal(notifyStyle({}, false), "banner");
+test("a nudge is a dialog by default, because a banner you were not looking at is a banner you missed", () => {
+  assert.equal(notifyStyle({}, false), "alert");
   assert.equal(notifyStyle({}, true), "alert");
+  assert.equal(notifyStyle(DEFAULTS, false), "alert", "and the shipped config agrees");
+
+  // `auto` is the narrower behaviour, for anyone who finds that too much: only
+  // the mark with nothing after it takes the screen.
+  assert.equal(notifyStyle({ notify: { style: "auto" } }, false), "banner");
+  assert.equal(notifyStyle({ notify: { style: "auto" } }, true), "alert");
+
   assert.equal(notifyStyle({ notify: { style: "banner" } }, true), "banner", "forced off, even when urgent");
-  assert.equal(notifyStyle({ notify: { style: "alert" } }, false), "alert", "forced on, even when not");
-  assert.equal(notifyStyle({ notify: { style: "nonsense" } }, true), "alert", "an unreadable setting falls back to auto");
+  assert.equal(notifyStyle({ notify: { style: "nonsense" } }, false), "alert", "an unreadable setting falls back to the default");
 });
 
 test("the macOS dialog carries the marmot and waits for a click", () => {
@@ -487,10 +491,23 @@ test("an urgent nudge takes the dialog, and skips the terminal's banner to get i
   assert.match(did.desktop.args[did.desktop.args.length - 1], /MessageBox/);
 });
 
-test("an ordinary nudge still goes out as a banner", () => {
+test("an ordinary nudge is a dialog too, now that it is the default", () => {
   const did = alert(DEFAULTS, { title: "t", body: "b", urgent: false, platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
-  assert.equal(did.style, "banner");
-  assert.match(did.desktop.args[did.desktop.args.length - 1], /BalloonTip/);
+  assert.equal(did.style, "alert");
+  assert.match(did.desktop.args[did.desktop.args.length - 1], /MessageBox/);
+});
+
+test("a caller may insist on a banner, but never the other way", () => {
+  // The digest uses this: it is a summary you read when you sit down, and a box
+  // in the way of every session start is how the whole thing gets muted.
+  const digest = alert(DEFAULTS, { title: "t", body: "b", style: "banner", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(digest.style, "banner");
+  assert.match(digest.desktop.args[digest.desktop.args.length - 1], /BalloonTip/);
+
+  // Asking for a dialog cannot override a user who has switched them off.
+  const cfg = { ...DEFAULTS, notify: { ...DEFAULTS.notify, style: "banner" } };
+  const forced = alert(cfg, { title: "t", body: "b", style: "alert", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(forced.style, "banner", "notify.style is the user's to set");
 });
 
 test("notify.style banner keeps the dialog away even from the last mark", () => {

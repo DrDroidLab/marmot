@@ -46,15 +46,21 @@ The desktop notification stays short. Claude Code gets the evidence and the
 next action in its transcript. Marmot speaks once per rule instead of repeating
 the same warning after every turn.
 
-The last mark before a limit is different. A banner you were not looking at is a
-banner you missed, and at 90% there is no next one — so that nudge arrives as a
-dialog that carries the marmot, has room for what to do about it, and waits
-until you dismiss it. Everything before it stays a banner.
+A nudge arrives as a dialog: it carries the marmot, has room for what to do
+about it as well as what it cost, and waits until you dismiss it. A banner you
+were not looking at is a banner you missed, which is the whole failure this is
+here to fix.
+
+The daily digest stays a banner — it is a summary, not a warning.
 
 ```bash
-marmot test-notification --alert     # see it without nearly running out
-marmot config set notify.style=banner   # never; alert = always
+marmot test-notification              # see one
+marmot config set notify.style=auto   # dialogs only for the last mark before a limit
+marmot config set notify.style=banner # never a dialog
 ```
+
+On Linux nothing changes and nothing needs to: a critical notification there
+already shows the marmot and already never expires.
 
 ## See where the tokens went
 
@@ -312,10 +318,11 @@ a nudge instead of creating a second, duplicated alarm.
 
   "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
-  // style: "auto" is a dialog for the last mark before a limit
-  // and a banner for everything else. "alert" always, "banner" never.
+  // style: "alert" is a dialog that waits for you — the default.
+  // "auto" is a dialog only for the last mark before a limit;
+  // "banner" is never one.
   "notify": { "desktop": true, "bell": true, "app": null,
-              "sound": "Ping", "persist": true, "style": "auto" },
+              "sound": "Ping", "persist": true, "style": "alert" },
 
   "digest": { "cadence": "daily" },
 
@@ -391,10 +398,11 @@ marmot test-notification
 If the test does not appear, check Focus or Do Not Disturb first. Then run
 `marmot doctor` to see which notification path Marmot is using.
 
-Banners fade on their own, and on macOS how long they last is the Alert style of
-whichever app posts them — not something Marmot can set. If they go past too
-fast, either set that app to *Alerts* in System Settings → Notifications, or
-have every nudge arrive as a dialog instead:
+Nudges are dialogs by default, which sidesteps this. If you have set
+`notify.style` to `auto` or `banner`, note that banners fade on their own — and
+on macOS how long they last is the Alert style of whichever app posts them, not
+something Marmot can set. Either set that app to *Alerts* in System Settings →
+Notifications, or go back to dialogs:
 
 ```bash
 marmot config set notify.style=alert

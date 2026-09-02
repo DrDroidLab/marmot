@@ -571,7 +571,10 @@ if (cmd === "test-notification" || cmd === "test-notif") {
   // `--alert` previews the shape reserved for the last mark before a limit,
   // which is otherwise hard to see on purpose — you have to nearly run out.
   const urgent = argv.includes("--alert");
-  const style = notifyStyle(cfg, urgent);
+  // `--banner` previews the other shape, which is otherwise only seen by
+  // someone who has turned dialogs off.
+  const forced = argv.includes("--banner") ? "banner" : null;
+  const style = forced ?? notifyStyle(cfg, urgent);
   const d = deliverability({ app: cfg.notify?.app ?? null, style });
 
   // The same call a real nudge makes, with the same config — a test that took a
@@ -582,6 +585,7 @@ if (cmd === "test-notification" || cmd === "test-notif") {
       ? "90% of your weekly limit is gone on Claude Max 20x. It resets in 2.1h. 42% of this window ran on subagents.\n\nStart a fresh session rather than carrying context you have finished with."
       : "This session has reached $82.50 against a $25.00 cap, over 60 model turns.",
     urgent,
+    style: forced,
   });
 
   process.stdout.write(`\n  ${bold("Sent a test notification.")} It is the same call a real nudge makes.\n\n`);
@@ -590,7 +594,7 @@ if (cmd === "test-notification" || cmd === "test-notif") {
     ["Bell", cfg.notify?.bell === false ? dim("off in your config (notify.bell)") : did.bell === "tty" ? "rang the terminal" : did.bell === "stderr" ? dim("written to stderr — no terminal to ring") : warn("not rung")],
     ["Channel", d.detail],
     ["Stays up", style === "alert" ? "yes — it waits for a click" : cfg.notify?.persist === false ? "no — notify.persist is false" : d.persistHint ? warn("macOS decides this, see below") : "yes, until you dismiss it"],
-    ["Style", style === "alert" ? "dialog, with the marmot" : `banner${cfg.notify?.style === "banner" ? " — always, per notify.style" : "; the last mark before a limit gets a dialog"}`],
+    ["Style", style === "alert" ? "dialog, with the marmot" : forced ? "banner — because you asked for --banner" : cfg.notify?.style === "auto" ? "banner; the last mark before a limit gets a dialog" : "banner — always, per notify.style"],
   ];
   const w = Math.max(...rows.map((r) => r[0].length));
   for (const [k, v] of rows) process.stdout.write(`  ${k.padEnd(w)}  ${v}\n`);
@@ -748,8 +752,8 @@ if (cmd === "doctor") {
 
   // A notification that is accepted and silently dropped is worse than none,
   // so say plainly whether one would actually arrive.
-  const { deliverability } = await import("../src/notify.mjs");
-  const d = deliverability({ app: cfg.notify?.app ?? null });
+  const { deliverability, notifyStyle } = await import("../src/notify.mjs");
+  const d = deliverability({ app: cfg.notify?.app ?? null, style: notifyStyle(cfg, false) });
   const notify = !cfg.notify?.desktop
     ? "off in your config"
     : d.status === "silenced"

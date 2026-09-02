@@ -84,7 +84,9 @@ if (event === "SessionStart") {
   const body = renderNudges(nudges, { compact: true });
   state.digestShownOn = today;
   writeState(state, root);
-  if (body.trim()) alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, "") });
+  // A banner, whatever notify.style says: a digest is what happened yesterday,
+  // and nothing about yesterday needs the screen at the start of today.
+  if (body.trim()) alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), style: "banner" });
   emit(event, body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`);
 }
 
