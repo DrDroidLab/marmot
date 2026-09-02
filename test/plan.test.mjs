@@ -143,6 +143,14 @@ test("limit-reached speaks at the highest mark a window has passed", () => {
   assert.equal(keyAt(74), "limit-reached:weekly_all:50");
   assert.equal(keyAt(76), "limit-reached:weekly_all:75");
   assert.equal(keyAt(100), "limit-reached:weekly_all:90", "past the last mark, it stays the last mark");
+
+  // Only the last mark takes the screen. 50% and 75% are information you can
+  // read when you look; 90% is the one with nothing after it.
+  const urgentAt = (pct) => windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: at(pct) }).find((w) => w.id === "limit-reached")?.urgent;
+  assert.equal(urgentAt(50), false);
+  assert.equal(urgentAt(76), false);
+  assert.equal(urgentAt(90), true);
+  assert.equal(urgentAt(100), true);
 });
 
 test("the key is what makes each mark speak once and the next one news", () => {
@@ -395,6 +403,9 @@ test("pace needs a window length and a reset time it can trust", () => {
 test("limit-pace fires when a window runs out before it resets", () => {
   const plan = { plan: "Max 20×", ageMins: 1, limits: [weekly(78, 4)] };
   const hit = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan }).find((w) => w.id === "limit-pace");
+  // Always urgent: it is the only nudge with a deadline inside it — the window
+  // runs out before it resets, and only while it is still running can you act.
+  assert.equal(hit.urgent, true);
   assert.ok(hit);
   assert.match(hit.detail, /through the weekly window with 78% of it gone/);
   assert.match(hit.detail, /the pace that would last/);

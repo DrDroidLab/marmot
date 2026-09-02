@@ -25,7 +25,7 @@ import { evaluate, sessionRules, windowRules } from "../src/rules.mjs";
 import { renderNudges } from "../src/render.mjs";
 import { readState, writeState, shouldFire, markFired, withinQuietPeriod, markNudged } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
-import { alert } from "../src/notify.mjs";
+import { alert, notifyStyle } from "../src/notify.mjs";
 import { readPlan, refreshUsage, worthRefreshing, readAttribution } from "../src/plan.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
@@ -111,7 +111,7 @@ for (const rule of sessionRules) {
   if (!hit) continue;
   if (!shouldFire(state, current.id, rule.id, current.cost)) continue;
   markFired(state, current.id, rule.id, current.cost);
-  lines.push({ label: rule.label, detail: hit.detail, action: hit.action });
+  lines.push({ label: rule.label, detail: hit.detail, action: hit.action, urgent: hit.urgent === true });
 }
 
 // Today's total needs the other sessions too. They change slowly; re-read at
@@ -135,7 +135,7 @@ if (live.has("daily-cost") || live.has("daily-baseline") || live.has("limit-reac
     const key = w.key ?? w.id;
     if (!shouldFire(state, today, key, todayCost)) continue;
     markFired(state, today, key, todayCost);
-    lines.push({ label: w.label, detail: w.detail, action: w.action });
+    lines.push({ label: w.label, detail: w.detail, action: w.action, urgent: w.urgent === true });
   }
 }
 
@@ -158,7 +158,14 @@ writeState(state, root);
 
 alert(cfg, {
   title: `Marmot · ${show[0].label}`,
-  body: lines.length > 1 ? `${show[0].detail} (+${lines.length - 1} more)` : show[0].detail,
+  // A banner gets the one line it has room for. A dialog has room for the whole
+  // nudge, so it carries what to do about it too — which is the half that
+  // makes it worth interrupting for.
+  body:
+    (notifyStyle(cfg, show[0].urgent) === "alert"
+      ? `${show[0].detail}\n\n${show[0].action}`
+      : show[0].detail) + (lines.length > 1 ? `\n\n${lines.length - 1} more in \`marmot\`.` : ""),
+  urgent: show[0].urgent,
 });
 
 emit(

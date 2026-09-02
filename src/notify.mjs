@@ -34,6 +34,40 @@ const clean = (s, n = 180) =>
     .slice(0, n);
 
 /**
+ * The same, for a dialog rather than a banner.
+ *
+ * A banner gets one flattened line because that is all the strip of space at
+ * the corner of the screen can hold. A dialog is a box that grows, so the
+ * nudge can keep its shape: what happened, what it cost, what to do instead,
+ * on separate lines. Raw newlines survive an `osascript -e` string literal.
+ */
+const cleanBlock = (s, n = 600) =>
+  String(s ?? "")
+    .replace(/["\\]/g, "")
+    .replace(/[^\S\n]+/g, " ")
+    .split("\n")
+    .map((l) => l.trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, n);
+
+/**
+ * Banner or dialog, for this nudge.
+ *
+ * `auto` is the default and the reason this is not just a boolean: a dialog
+ * interrupts, and something that interrupts every time is something you turn
+ * off. So the marks on the way to a limit arrive as banners, and only the last
+ * one — the one where you are actually about to run out — is worth taking the
+ * screen for. `alert` and `banner` force it either way.
+ */
+export function notifyStyle(cfg, urgent = false) {
+  const s = cfg?.notify?.style ?? "auto";
+  if (s === "alert" || s === "banner") return s;
+  return urgent ? "alert" : "banner";
+}
+
+/**
  * Terminals that turn an OSC 9 escape sequence into a desktop notification.
  *
  * This is the channel to prefer, because it belongs to the terminal you are
@@ -156,6 +190,60 @@ export function notifyCommand(platform, title, body, env = process.env, app = nu
 }
 
 /**
+ * A dialog: a box that stays until you dismiss it, and carries the marmot.
+ *
+ * This exists because on macOS `display notification` can do neither. It has no
+ * icon parameter at all — the icon is whichever app posted it — and no
+ * persistence parameter either; whether a banner waits or fades is the Alert
+ * style of that same app, which only a human can set in System Settings. An app
+ * bundle was the obvious fix and does not work: `open -a` will not run an
+ * AppleScript applet with arguments, and running one through `osascript` posts
+ * as osascript, so the icon is no closer. A real custom icon needs a signed
+ * Cocoa app calling UNUserNotificationCenter — a build pipeline and a release
+ * artifact, for a nudge.
+ *
+ * `display dialog` takes `with icon` and waits for a click. Both problems, one
+ * call, nothing installed.
+ *
+ * Linux gets null on purpose. `notify-send -u critical` already never expires
+ * and already shows the icon, so it has nothing to gain from a modal — and
+ * zenity is not installed everywhere, where a failed spawn would cost the nudge
+ * entirely.
+ */
+export function dialogCommand(platform, title, body, sound = null, icon = iconPath("png")) {
+  const t = clean(title, 80);
+  const b = cleanBlock(body);
+  if (!b) return null;
+
+  if (platform === "darwin") {
+    // A dialog has no `sound name`, so the sound is played alongside it.
+    // Whitelisted to letters, because unlike the rest of this it is
+    // interpolated into a shell command.
+    const name = sound && /^[A-Za-z]+$/.test(sound) ? sound : null;
+    const play = name ? `do shell script "afplay /System/Library/Sounds/${name}.aiff > /dev/null 2>&1 &"\n` : "";
+    const withIcon = icon ? ` with icon POSIX file "${icon.replace(/["\\]/g, "")}"` : "";
+    return {
+      cmd: "osascript",
+      args: ["-e", `${play}display dialog "${b}" with title "${t}"${withIcon} buttons {"Dismiss"} default button "Dismiss"`],
+      style: "alert",
+    };
+  }
+
+  if (platform === "win32") {
+    // The balloon above cannot do this: Windows 10 and 11 retire a toast to the
+    // Action Center after a few seconds whatever timeout it was given. A
+    // message box is the thing that actually waits.
+    const ps = [
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      `[System.Windows.Forms.MessageBox]::Show(${psQuote(b)},${psQuote(t)},'OK','Warning')`,
+    ].join(" ");
+    return { cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps], style: "alert" };
+  }
+
+  return null;
+}
+
+/**
  * A PowerShell single-quoted literal, where the only escape is a doubled
  * quote. Everything else — $, backticks, backslashes — is inert inside one.
  */
@@ -164,10 +252,10 @@ const psQuote = (v) => `'${String(v ?? "").replace(/'/g, "''")}'`;
 /**
  * The marmot, for platforms whose notifications can show one.
  *
- * Linux takes any image path; Windows needs an .ico, which is why one is
- * committed beside the SVG. macOS shows the posting application's icon and
- * gives `display notification` no say in it — a custom icon there would mean
- * shipping an app bundle, which is not worth it for a nudge.
+ * Linux takes any image path, Windows needs an .ico, and a macOS dialog takes
+ * a PNG — which is why all three sit beside the SVG. A macOS *banner* still
+ * shows the posting app's icon and gives us no say; only `dialogCommand` can
+ * put the marmot on the screen there.
  */
 export function iconPath(kind) {
   try {
@@ -191,8 +279,20 @@ export const silenced = (env = process.env) => Boolean(env.MARMOT_NO_NOTIFY || e
  * means the app has not registered, not that delivery fails. A false alarm that
  * talks someone out of a working feature is worse than no check at all.
  */
-export function deliverability({ platform = process.platform, env = process.env, app = null } = {}) {
+export function deliverability({ platform = process.platform, env = process.env, app = null, style = "banner" } = {}) {
   if (silenced(env)) return { deliverer: null, channel: "none", status: "silenced", detail: "MARMOT_NO_NOTIFY or CI is set" };
+
+  // A dialog answers both of the questions this function exists to answer —
+  // who posts it, and whether it waits — so it short-circuits the rest.
+  if (style === "alert" && dialogCommand(platform, "t", "b")) {
+    return {
+      deliverer: "Marmot",
+      channel: "dialog",
+      status: "ok",
+      detail: platform === "darwin" ? "a dialog, with the marmot, that waits for you" : "a message box that waits for you",
+      persistHint: null,
+    };
+  }
 
   const term = app ? null : oscNotifier(env);
   if (term) return { deliverer: term.name, channel: "terminal", status: "ok", detail: `${term.name} posts them itself, with nothing to allow` };
@@ -222,9 +322,10 @@ export function deliverability({ platform = process.platform, env = process.env,
  * which is what the tests assert on — firing a real popup to check is not a
  * test anyone wants to run.
  */
-export function alert(cfg, { title = "Marmot", body = "", platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
+export function alert(cfg, { title = "Marmot", body = "", urgent = false, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
   const n = cfg?.notify ?? {};
-  const did = { bell: false, desktop: null };
+  const style = notifyStyle(cfg, urgent);
+  const did = { bell: false, desktop: null, style };
 
   if (n.bell && !silenced(env)) {
     // A hook's stderr is a pipe Claude Code reads, not a terminal, so a bell
@@ -255,6 +356,22 @@ export function alert(cfg, { title = "Marmot", body = "", platform = process.pla
   // grant, and it works the same everywhere. Only when the terminal has no
   // such channel do we fall back to the OS, which on macOS needs permission
   // the host app may not have.
+  // A dialog is asked for by the nudge, not by the terminal, so the terminal's
+  // own banner channel is skipped for one — an OSC banner is precisely the
+  // thing this nudge was judged too important to be.
+  const dialog = style === "alert" ? dialogCommand(platform, title, body, n.bell ? (n.sound ?? "Ping") : null) : null;
+  if (dialog) {
+    try {
+      const child = spawn(dialog.cmd, dialog.args, { detached: true, stdio: "ignore" });
+      child.on("error", () => {});
+      child.unref();
+      did.desktop = dialog;
+      return did;
+    } catch {
+      /* fall through to a banner, which is better than silence */
+    }
+  }
+
   const notifier = n.app ? null : oscNotifier(env);
   if (notifier && ttyPath) {
     const seq = oscSequence(notifier, title, body);

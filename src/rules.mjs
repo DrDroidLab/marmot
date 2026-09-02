@@ -241,6 +241,9 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
             ? "The 5-hour window refills on its own. Heavy context is what fills it fastest, so a fresh session or a /compact buys back more than working slower does."
             : "Worth knowing before the week is out. The cheapest savings are usually idle MCP servers and sessions carrying context they finished with.",
         because: why?.id ?? null,
+        // The last mark before the limit is the one worth taking the screen
+        // for. The earlier ones are information; this one is a deadline.
+        urgent: crossed === steps[steps.length - 1],
         sessions: [],
       });
     }
@@ -263,6 +266,9 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
         detail: `${Math.round(p.elapsedPct)}% through the ${l.label} window with ${l.percent}% of it gone — ${p.pace.toFixed(1)}× the pace that would last. At this rate it runs out in about ${mins(p.exhaustsInMs / 60_000)}, ${mins((p.remainingMs - p.exhaustsInMs) / 60_000)} before it resets.`,
         action:
           "The levers, biggest first: detach MCP servers you are not calling, start a fresh session rather than carrying context you have finished with, and drop to Sonnet for work that does not need more.",
+        // Always: this one says the window runs out before it resets, which is
+        // only worth knowing while there is still time to change it.
+        urgent: true,
         sessions: [],
       });
     }

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { notifyCommand, alert, silenced, deliverability, oscNotifier, oscSequence, iconPath } from "../src/notify.mjs";
+import { notifyCommand, alert, silenced, deliverability, oscNotifier, oscSequence, iconPath, dialogCommand, notifyStyle } from "../src/notify.mjs";
 import { DEFAULTS } from "../src/config.mjs";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -403,4 +403,126 @@ test("a binary that is not there cannot take the process down with it", () => {
   assert.doesNotThrow(() =>
     alert({ notify: { desktop: true, bell: false } }, { body: "x", platform: "linux", stream: s, env: quiet, ttyPath: null }),
   );
+});
+
+
+/**
+ * Dialogs. These assert on the command that would be run, never by running it:
+ * a test that pops a real box is a test somebody has to sit and click.
+ *
+ * Where `alert()` itself is under test the platform is win32, because spawning
+ * a missing `powershell` on the machine running these fails harmlessly and
+ * asynchronously — while spawning `osascript` would succeed, and put a dialog
+ * on the screen of whoever ran `npm test`.
+ */
+
+test("a dialog is for the nudge that says you are about to run out, not the ones before it", () => {
+  // The whole design in four lines: something that interrupts every time is
+  // something you switch off, and then the last mark cannot reach you either.
+  assert.equal(notifyStyle({}, false), "banner");
+  assert.equal(notifyStyle({}, true), "alert");
+  assert.equal(notifyStyle({ notify: { style: "banner" } }, true), "banner", "forced off, even when urgent");
+  assert.equal(notifyStyle({ notify: { style: "alert" } }, false), "alert", "forced on, even when not");
+  assert.equal(notifyStyle({ notify: { style: "nonsense" } }, true), "alert", "an unreadable setting falls back to auto");
+});
+
+test("the macOS dialog carries the marmot and waits for a click", () => {
+  const c = dialogCommand("darwin", "Marmot", "90% of your weekly limit is gone.", null, "/tmp/marmot.png");
+  const script = c.args[1];
+  assert.equal(c.cmd, "osascript");
+  assert.match(script, /display dialog/);
+  assert.match(script, /with icon POSIX file "\/tmp\/marmot.png"/, "the icon display notification cannot have");
+  assert.match(script, /buttons \{"Dismiss"\}/);
+  assert.doesNotMatch(script, /giving up after/, "a timeout is the one thing it must not have");
+});
+
+test("a dialog keeps the line breaks a banner has to flatten", () => {
+  // The reason to want one, beyond persistence: room for what to do about it.
+  const c = dialogCommand("darwin", "t", "What it cost.\n\nWhat to do instead.", null, null);
+  assert.match(c.args[1], /What it cost\.\n\nWhat to do instead\./);
+
+  const banner = notifyCommand("darwin", "t", "What it cost.\n\nWhat to do instead.", quiet);
+  assert.match(banner.args[1], /What it cost\. What to do instead\./, "a banner still gets one line");
+});
+
+test("a dollar figure survives into the dialog", () => {
+  // Stripping shell metacharacters here once cost every cost nudge its dollar
+  // sign, and "reached 82.50" is not a sentence about money.
+  assert.match(dialogCommand("darwin", "t", "reached $82.50 against a $25.00 cap", null, null).args[1], /\$82\.50/);
+});
+
+test("the dialog's sound name cannot carry a shell command", () => {
+  // Unlike everything else here it is interpolated into a `do shell script`,
+  // so it is whitelisted rather than escaped.
+  assert.match(dialogCommand("darwin", "t", "b", "Glass", null).args[1], /afplay \/System\/Library\/Sounds\/Glass\.aiff/);
+  assert.doesNotMatch(dialogCommand("darwin", "t", "b", "x; rm -rf /", null).args[1], /afplay/);
+  assert.doesNotMatch(dialogCommand("darwin", "t", "b", null, null).args[1], /afplay/);
+});
+
+test("Windows gets a message box, because its toast retires itself whatever timeout it is given", () => {
+  const c = dialogCommand("win32", "Marmot", "90% of your weekly limit is gone.", null, null);
+  assert.equal(c.cmd, "powershell");
+  assert.match(c.args[c.args.length - 1], /MessageBox\]::Show/);
+  assert.match(c.args[c.args.length - 1], /'Warning'/);
+});
+
+test("Linux gets no dialog, because its critical notification already never expires", () => {
+  // And zenity is not installed everywhere — a failed spawn there would cost
+  // the nudge entirely, which is worse than the banner it already has.
+  assert.equal(dialogCommand("linux", "t", "b"), null);
+  const banner = notifyCommand("linux", "t", "b", quiet, null, null, true);
+  assert.ok(banner.args.includes("-u") && banner.args.includes("critical"));
+});
+
+test("an empty body raises no dialog", () => {
+  assert.equal(dialogCommand("darwin", "t", "   "), null);
+});
+
+test("an urgent nudge takes the dialog, and skips the terminal's banner to get it", () => {
+  // iTerm2 would happily post an OSC banner here — which is exactly the thing
+  // this nudge was judged too important to be.
+  const did = alert(DEFAULTS, { title: "t", body: "b", urgent: true, platform: "win32", env: { TERM_PROGRAM: "iTerm.app" }, ttyPath: null, stream: fakeStream() });
+  assert.equal(did.style, "alert");
+  assert.equal(did.desktop.style, "alert");
+  assert.match(did.desktop.args[did.desktop.args.length - 1], /MessageBox/);
+});
+
+test("an ordinary nudge still goes out as a banner", () => {
+  const did = alert(DEFAULTS, { title: "t", body: "b", urgent: false, platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(did.style, "banner");
+  assert.match(did.desktop.args[did.desktop.args.length - 1], /BalloonTip/);
+});
+
+test("notify.style banner keeps the dialog away even from the last mark", () => {
+  const cfg = { ...DEFAULTS, notify: { ...DEFAULTS.notify, style: "banner" } };
+  const did = alert(cfg, { title: "t", body: "b", urgent: true, platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(did.style, "banner");
+  assert.match(did.desktop.args[did.desktop.args.length - 1], /BalloonTip/);
+});
+
+test("a silenced environment raises no dialog either", () => {
+  const did = alert(DEFAULTS, { title: "t", body: "b", urgent: true, platform: "win32", env: { MARMOT_NO_NOTIFY: "1" }, ttyPath: null, stream: fakeStream() });
+  assert.equal(did.desktop, null);
+});
+
+test("doctor reports a dialog as answering both questions at once", () => {
+  const d = deliverability({ platform: "darwin", env: quiet, style: "alert" });
+  assert.equal(d.channel, "dialog");
+  assert.equal(d.persistHint, null, "nothing for the user to go and set");
+  const linux = deliverability({ platform: "linux", env: quiet, style: "alert" });
+  assert.equal(linux.channel, "linux", "no dialog there, so nothing changes");
+});
+
+test("the marmot ships in every format its platforms need", () => {
+  for (const kind of ["png", "ico", "svg"]) assert.ok(iconPath(kind), `docs/marmot.${kind} is missing`);
+});
+
+test("every icon the notifiers reach for is actually published", () => {
+  // iconPath() resolves against the installed copy, so an asset left out of
+  // package.json `files` fails only on someone else's machine, silently, as a
+  // notification with no marmot on it.
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  for (const kind of ["png", "ico", "svg"]) {
+    assert.ok(pkg.files.includes(`docs/marmot.${kind}`), `docs/marmot.${kind} is used but not shipped`);
+  }
 });
