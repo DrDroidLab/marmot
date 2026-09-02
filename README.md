@@ -46,15 +46,39 @@ The desktop notification stays short. Claude Code gets the evidence and the
 next action in its transcript. Marmot speaks once per rule instead of repeating
 the same warning after every turn.
 
-The last mark before a limit is different. A banner you were not looking at is a
-banner you missed, and at 90% there is no next one — so that nudge arrives as a
-dialog that carries the marmot, has room for what to do about it, and waits
-until you dismiss it. Everything before it stays a banner.
+Both nudges and the daily digest arrive as a **dialog**: it carries the marmot,
+has room for what to do about it as well as what it cost, and stays until you
+dismiss it. A banner you were not looking at is a banner you missed, which is
+the whole failure this is here to fix.
 
 ```bash
-marmot test-notification --alert     # see it without nearly running out
-marmot config set notify.style=banner   # never; alert = always
+marmot test-notification            # see a nudge
+marmot test-notification --digest   # see the daily digest
+marmot test-notification --banner   # see the other shape
 ```
+
+The two are set separately, so you can keep the interruption for the thing that
+is costing you money and let the once-a-day summary stay out of the way:
+
+```bash
+marmot config set notify.style.digest=banner   # summary as a banner
+marmot config set notify.style.nudge=auto      # dialog only near a limit
+marmot config set notify.style=banner          # both, as banners
+```
+
+| | |
+|---|---|
+| `alert` | A dialog. Marmot icon, room for the action, waits for a click. **Default for both.** |
+| `banner` | The ordinary desktop notification. **No marmot on it, and it dismisses itself.** |
+| `auto` | A dialog only near a limit — the last mark, or a window burning faster than it refills. Banner otherwise. |
+
+The `banner` caveats are not Marmot's choice. On macOS a notification's icon is
+whichever app posted it, and how long it stays is that app's *Alert style* in
+System Settings — neither is something `display notification` can set. The
+dialog exists because it can do both.
+
+On Linux none of this applies and nothing needs setting: a critical
+notification there already shows the marmot and already never expires.
 
 ## See where the tokens went
 
@@ -312,10 +336,12 @@ a nudge instead of creating a second, duplicated alarm.
 
   "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
-  // style: "auto" is a dialog for the last mark before a limit
-  // and a banner for everything else. "alert" always, "banner" never.
+  // style: "alert" is a dialog that waits for you — the default for
+  // both. "banner" is the ordinary notification: no marmot on it, and
+  // it dismisses itself. "auto" is a dialog only near a limit.
   "notify": { "desktop": true, "bell": true, "app": null,
-              "sound": "Ping", "persist": true, "style": "auto" },
+              "sound": "Ping", "persist": true,
+              "style": { "nudge": "alert", "digest": "alert" } },
 
   "digest": { "cadence": "daily" },
 
@@ -391,10 +417,11 @@ marmot test-notification
 If the test does not appear, check Focus or Do Not Disturb first. Then run
 `marmot doctor` to see which notification path Marmot is using.
 
-Banners fade on their own, and on macOS how long they last is the Alert style of
-whichever app posts them — not something Marmot can set. If they go past too
-fast, either set that app to *Alerts* in System Settings → Notifications, or
-have every nudge arrive as a dialog instead:
+Both are dialogs by default, which sidesteps this. If you have set
+`notify.style` to `auto` or `banner`, note that banners fade on their own — and
+on macOS how long they last is the Alert style of whichever app posts them, not
+something Marmot can set. Either set that app to *Alerts* in System Settings →
+Notifications, or go back to dialogs:
 
 ```bash
 marmot config set notify.style=alert

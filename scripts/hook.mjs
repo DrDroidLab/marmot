@@ -84,7 +84,7 @@ if (event === "SessionStart") {
   const body = renderNudges(nudges, { compact: true });
   state.digestShownOn = today;
   writeState(state, root);
-  if (body.trim()) alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, "") });
+  if (body.trim()) alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), kind: "digest" });
   emit(event, body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`);
 }
 

@@ -241,9 +241,22 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    `display dialog` takes `with icon POSIX file` (a **PNG** is fine — no `.icns`
    needed, which is why `docs/marmot.png` is 14KB rather than 425KB) and waits
    for a click. That is `dialogCommand()` in `notify.mjs`, and it is the only
-   thing on macOS that solves either problem. It is deliberately not the
-   default: something that interrupts every time gets switched off, and then the
-   nudge that mattered cannot reach you either.
+   thing on macOS that solves either problem.
+
+   It is the **default**, for nudges and for the daily digest alike.
+   `notify.style` is `{ nudge, digest }`, each `alert` / `auto` / `banner`, so
+   the two are set separately; a plain string still sets both, which is what the
+   setting used to be. Callers say which they are with `kind` rather than
+   hard-coding a shape. A caller may force a banner (`test-notification
+   --banner`) but never a dialog — that direction is the user's setting to
+   make.
+
+   Two traps when touching this. `notifyStyle()` treats an unreadable value as
+   the default rather than falling through to `auto`, because one typo in a
+   config file silently downgrading every nudge is worse than ignoring the
+   typo. And any test that calls `alert()` with `platform: "darwin"` and no
+   explicit `style` now **spawns a real dialog on the machine running
+   `npm test`** — pass `style: "banner"` in tests that are about banners.
 
 8. **A slash command in a session whose plugin was just removed prints nothing
    at all.** `${CLAUDE_PLUGIN_ROOT}` empties, the command becomes

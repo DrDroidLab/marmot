@@ -55,16 +55,29 @@ const cleanBlock = (s, n = 600) =>
 /**
  * Banner or dialog, for this nudge.
  *
- * `auto` is the default and the reason this is not just a boolean: a dialog
- * interrupts, and something that interrupts every time is something you turn
- * off. So the marks on the way to a limit arrive as banners, and only the last
- * one — the one where you are actually about to run out — is worth taking the
- * screen for. `alert` and `banner` force it either way.
+ * A dialog by default. A nudge is a warning, and a banner you were not looking
+ * at is a banner you missed — which is the whole failure this is here to fix.
+ *
+ * `auto` keeps the narrower behaviour for anyone who finds that too much: only
+ * the nudge with nothing after it, the last mark before a limit, takes the
+ * screen. It is not the default because the marks that matter are exactly the
+ * ones people are too busy to notice.
+ *
+ * A caller may override both — the daily digest does, because it is a summary
+ * rather than a warning.
  */
-export function notifyStyle(cfg, urgent = false) {
-  const s = cfg?.notify?.style ?? "auto";
-  if (s === "alert" || s === "banner") return s;
-  return urgent ? "alert" : "banner";
+export function notifyStyle(cfg, urgent = false, kind = "nudge") {
+  const raw = cfg?.notify?.style;
+  // A plain string sets both kinds at once, which is what the setting used to
+  // be and is still the reasonable thing to type.
+  const s = typeof raw === "string" ? raw : raw && typeof raw === "object" ? raw[kind] : undefined;
+  if (s === "banner") return "banner";
+  if (s === "auto") return urgent ? "alert" : "banner";
+  // Anything else, including a typo and an absent setting, is the default.
+  // Falling through to `auto` instead would let one bad character in a config
+  // file quietly downgrade every notification below the level that was asked
+  // for.
+  return "alert";
 }
 
 /**
@@ -322,9 +335,12 @@ export function deliverability({ platform = process.platform, env = process.env,
  * which is what the tests assert on — firing a real popup to check is not a
  * test anyone wants to run.
  */
-export function alert(cfg, { title = "Marmot", body = "", urgent = false, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
+export function alert(cfg, { title = "Marmot", body = "", urgent = false, kind = "nudge", style: forced = null, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
   const n = cfg?.notify ?? {};
-  const style = notifyStyle(cfg, urgent);
+  // A caller may insist on a banner — `marmot test-notification --banner` does,
+  // to show you the other shape. It cannot insist the other way: that is the
+  // user's setting to make.
+  const style = forced === "banner" ? "banner" : notifyStyle(cfg, urgent, kind);
   const did = { bell: false, desktop: null, style };
 
   if (n.bell && !silenced(env)) {
