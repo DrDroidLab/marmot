@@ -13,6 +13,7 @@
 import { configuredServers, byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins } from "./format.mjs";
 import { paysPerToken, usableLimits, limitPace } from "./plan.mjs";
+import { bestDiagnosis } from "./diagnose.mjs";
 
 const premiumCost = (s, cfg) =>
   Object.entries(s.models)
@@ -235,17 +236,21 @@ export const sessionRules = [
 ];
 
 /** Rules that need the whole window rather than one session. */
-export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null, plan = null, attribution = null } = {}) {
+export function windowRules(sessions, cfg, { root, today = new Date().toISOString().slice(0, 10), includeMcp = true, configured: configuredOverride, mcpSizes = null, cwd = null, plan = null, attribution = null, diagnose = null } = {}) {
   const out = [];
   const days = byDay(sessions);
   const todayRow = days.find((d) => d.day === today);
 
   if (todayRow && dollarsAreBilled(plan) && todayRow.cost > cfg.daily.costCap) {
+    const why = diagnose ? bestDiagnosis(diagnose, { floor: cfg.limits?.causeFloor ?? 0.08 }) : null;
     out.push({
       id: "daily-cost",
       label: "Day past the cost cap",
-      detail: `${usd(todayRow.cost)} so far today across ${todayRow.sessions} session${todayRow.sessions === 1 ? "" : "s"}, against a ${usd(cfg.daily.costCap)} cap.`,
-      action: "Nothing is wrong with a heavy day. This is the cap you set, saying you have reached it.",
+      detail:
+        `${usd(todayRow.cost)} so far today across ${todayRow.sessions} session${todayRow.sessions === 1 ? "" : "s"}, against a ${usd(cfg.daily.costCap)} cap.` +
+        (why ? ` ${why.line}` : ""),
+      action: why ? why.action : "Nothing is wrong with a heavy day. This is the cap you set, saying you have reached it.",
+      because: why?.id ?? null,
       sessions: sessions.filter((s) => s.day === today).map((s) => s.id),
     });
   }
@@ -281,17 +286,25 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
       if (crossed === undefined) continue;
       const age = plan.ageMins !== null && plan.ageMins > (cfg.limits.staleAfterMins ?? 60) ? ` as of ${mins(plan.ageMins)} ago` : "";
       const resets = l.resetsAt ? ` It resets ${resetWording(l.resetsAt)}.` : "";
+      // The threshold says where you are; the diagnosis says what to do about
+      // it. Without one the nudge still fires — knowing you are at 75% is worth
+      // saying on its own — it just goes out without a middle sentence.
+      const why = diagnose ? bestDiagnosis(diagnose, { floor: cfg.limits?.causeFloor ?? 0.08 }) : null;
       out.push({
         id: "limit-reached",
         // Keyed by the mark, so crossing the next one is news and re-reading
         // the same one is not.
         key: `limit-reached:${l.kind}:${crossed}`,
-        label: `${l.label === "weekly" ? "Weekly" : "Session"} limit ${l.percent}% used`,
-        detail: `${l.percent}% of your ${l.label} limit is gone${age}${plan.plan ? ` on ${plan.plan}` : ""}.${resets}`,
-        action:
-          l.kind === "session"
+        label: `${crossed}% of your ${l.label === "weekly" ? "weekly" : "5-hour"} limit`,
+        detail:
+          `${l.percent}% of your ${l.label} limit is gone${age}${plan.plan ? ` on ${plan.plan}` : ""}.${resets}` +
+          (why ? ` ${why.line}` : ""),
+        action: why
+          ? why.action
+          : l.kind === "session"
             ? "The 5-hour window refills on its own. Heavy context is what fills it fastest, so a fresh session or a /compact buys back more than working slower does."
             : "Worth knowing before the week is out. The cheapest savings are usually idle MCP servers and sessions carrying context they finished with.",
+        because: why?.id ?? null,
         sessions: [],
       });
     }
