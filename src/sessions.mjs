@@ -19,19 +19,43 @@ import { readServerConfigs } from "./mcp.mjs";
 
 export const defaultRoot = () => join(homedir(), ".claude");
 
-export function* sessionFiles(root) {
+/**
+ * Every transcript on disk.
+ *
+ * A session's own file sits at `projects/<project>/<id>.jsonl`. What a subagent
+ * did is **not in it** — it goes to `projects/<project>/<id>/subagents/*.jsonl`,
+ * a directory deeper. Missing those means missing the spend entirely, which for
+ * anyone leaning on subagents is most of the bill.
+ */
+export function* sessionFiles(root, { subagents = false } = {}) {
   const dir = join(root, "projects");
   if (!existsSync(dir)) return;
   for (const project of readdirSync(dir)) {
     let entries = [];
     try {
-      entries = readdirSync(join(dir, project));
+      entries = readdirSync(join(dir, project), { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const f of entries) {
-      if (!f.endsWith(".jsonl")) continue;
-      yield { project, path: join(dir, project, f), id: basename(f, ".jsonl") };
+    for (const e of entries) {
+      if (e.isFile() && e.name.endsWith(".jsonl")) {
+        yield { project, path: join(dir, project, e.name), id: basename(e.name, ".jsonl") };
+        continue;
+      }
+      if (!subagents || !e.isDirectory()) continue;
+      const sub = join(dir, project, e.name, "subagents");
+      if (!existsSync(sub)) continue;
+      let agents = [];
+      try {
+        agents = readdirSync(sub);
+      } catch {
+        continue;
+      }
+      for (const f of agents) {
+        if (!f.endsWith(".jsonl")) continue;
+        // The directory is the session that spawned it, which is who pays.
+        yield { project, path: join(sub, f), id: basename(f, ".jsonl"), parentId: e.name };
+      }
     }
   }
 }
@@ -78,6 +102,7 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
   const countedUsage = new Set();
   // tool_use id → tool name, so an error can be attributed to what failed.
   const toolNames = new Map();
+  let quietRun = { model: null, turns: 0 };
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -107,6 +132,17 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
     models: {},
     modelTurns: {},
     modelTokens: {},
+    // What subagents cost, separately. A session where most of the spend
+    // happened inside sidechains is a different problem from a long one.
+    sidechain: { turns: 0, tokens: 0, cost: 0 },
+    // The context carried into a turn — which is what "each turn re-sends 140K
+    // of history" measures. `last` is where the session is now, `peak` the
+    // worst it got.
+    history: { last: 0, peak: 0 },
+    // The longest run of consecutive turns on one model that produced almost
+    // nothing. Whether that model was an expensive choice is for the rules to
+    // say; the reader only measures the run.
+    longestQuietRun: { model: null, turns: 0, outputCap: 1000 },
     // The prefix carried into the first request: system prompt, CLAUDE.md,
     // every skill description and every attached tool definition. It is what
     // you pay before typing anything, and it rides on every later turn.
@@ -161,7 +197,10 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
       if (usageKey !== null) countedUsage.add(usageKey);
       const u = msg.usage;
       s.assistantTurns += 1;
-      if (o.isSidechain) s.sidechainTurns += 1;
+      if (o.isSidechain) {
+        s.sidechainTurns += 1;
+        s.sidechain.turns += 1;
+      }
       if (msg.model) s.modelTurns[msg.model] = (s.modelTurns[msg.model] ?? 0) + 1;
 
       const cc = u.cache_creation ?? {};
@@ -174,6 +213,21 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
       s.tokens.cacheRead += readTok;
       s.tokens.cacheWrite += writeTok;
       s.tokens.thinking += u.output_tokens_details?.thinking_tokens ?? 0;
+
+      // Carried context is the cache read: everything the model was handed
+      // again to answer this turn.
+      const carried = readTok + inTok;
+      s.history.last = carried;
+      if (carried > s.history.peak) s.history.peak = carried;
+
+      if (o.isSidechain) {
+        s.sidechain.tokens += inTok + outTok + readTok + writeTok;
+      }
+
+      // A run is broken by a different model or by a turn that did real work.
+      if (msg.model === quietRun.model && outTok < s.longestQuietRun.outputCap) quietRun.turns += 1;
+      else quietRun = { model: msg.model ?? null, turns: outTok < s.longestQuietRun.outputCap ? 1 : 0 };
+      if (quietRun.turns > s.longestQuietRun.turns) s.longestQuietRun = { ...s.longestQuietRun, ...quietRun };
 
       if (msg.model) {
         const mt = (s.modelTokens[msg.model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
@@ -197,6 +251,7 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
         s.pricedTurns += 1;
         s.cost += c;
         s.models[msg.model] = (s.models[msg.model] ?? 0) + c;
+        if (o.isSidechain) s.sidechain.cost += c;
       }
     }
 
@@ -241,16 +296,79 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
 export function loadSessions({ root = defaultRoot(), days = 30, rateOverrides } = {}) {
   const since = new Date(Date.now() - days * 86_400_000);
   const out = [];
-  for (const f of sessionFiles(root)) {
+  const byId = new Map();
+  const agents = [];
+
+  for (const f of sessionFiles(root, { subagents: true })) {
     try {
       if (statSync(f.path).mtime < since) continue;
     } catch {
       continue;
     }
     const s = readSession(f, { rateOverrides });
-    if (s) out.push(s);
+    if (!s) continue;
+    if (f.parentId) {
+      agents.push({ parentId: f.parentId, s });
+      continue;
+    }
+    byId.set(s.id, s);
+    out.push(s);
   }
+
+  // A subagent's spend belongs to the session that spawned it: it is that
+  // session's cost, and it is *also* what makes it a subagent-heavy session.
+  for (const { parentId, s } of agents) {
+    const parent = byId.get(parentId);
+    if (!parent) continue;
+    parent.cost += s.cost;
+    parent.assistantTurns += s.assistantTurns;
+    parent.pricedTurns += s.pricedTurns;
+    parent.totalToolCalls += s.totalToolCalls;
+    parent.toolErrors += s.toolErrors;
+    for (const k of ["input", "output", "cacheRead", "cacheWrite", "thinking"]) parent.tokens[k] += s.tokens[k];
+    for (const [m, c] of Object.entries(s.models)) parent.models[m] = (parent.models[m] ?? 0) + c;
+    for (const [m, t] of Object.entries(s.modelTokens)) {
+      const into = (parent.modelTokens[m] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+      for (const k of Object.keys(into)) into[k] += t[k] ?? 0;
+    }
+    for (const [n, c] of Object.entries(s.toolCalls)) parent.toolCalls[n] = (parent.toolCalls[n] ?? 0) + c;
+    for (const [n, c] of Object.entries(s.toolErrorsByName)) parent.toolErrorsByName[n] = (parent.toolErrorsByName[n] ?? 0) + c;
+    for (const [srv, n] of Object.entries(s.mcpCalls)) parent.mcpCalls[srv] = (parent.mcpCalls[srv] ?? 0) + n;
+    for (const k of s.skills) parent.skills.add(k);
+
+    parent.sidechainTurns += s.assistantTurns;
+    parent.sidechain.turns += s.assistantTurns;
+    parent.sidechain.cost += s.cost;
+    parent.sidechain.tokens += s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite;
+  }
+  for (const s of out) {
+    s.toolErrorRate = s.totalToolCalls ? s.toolErrors / s.totalToolCalls : 0;
+    const seen = s.tokens.cacheRead + s.tokens.cacheWrite + s.tokens.input;
+    s.cacheHitRate = seen ? s.tokens.cacheRead / seen : null;
+  }
+
   return out.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+}
+
+/** When each MCP server was last actually called, as a day string. */
+export function mcpLastUsed(sessions = []) {
+  const last = {};
+  for (const s of sessions) {
+    for (const srv of Object.keys(s.mcpCalls ?? {})) {
+      if (!last[srv] || s.day > last[srv]) last[srv] = s.day;
+    }
+  }
+  return last;
+}
+
+/** Whole days since each server was last called, from a `mcpLastUsed` map. */
+export function daysSince(lastUsed, now = Date.now()) {
+  const out = {};
+  for (const [srv, day] of Object.entries(lastUsed)) {
+    const t = Date.parse(`${day}T00:00:00Z`);
+    if (Number.isFinite(t)) out[srv] = Math.max(0, Math.floor((now - t) / 86_400_000));
+  }
+  return out;
 }
 
 /**
