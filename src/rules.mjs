@@ -131,20 +131,6 @@ export function longestGapMins(times = []) {
 /** Rules that judge one session on its own. */
 export const sessionRules = [
   {
-    id: "session-turns",
-    label: "Long session without a reset",
-    check(s, cfg) {
-      if (s.typedPrompts <= cfg.session.turnCap) return null;
-      if (cfg.session.turnCapRequiresNoCompaction && s.compactions > 0) return null;
-      if (s.cost < cfg.session.costFloor) return null;
-      return {
-        detail: `${s.typedPrompts} prompts in one session with no context reset, costing ${usd(s.cost)}.`,
-        action:
-          "Long sessions carry every earlier turn into every later one. Start a fresh session for the next distinct task, or /compact to drop what is no longer relevant.",
-      };
-    },
-  },
-  {
     id: "session-cost",
     label: "Session past the cost cap",
     check(s, cfg, ctx = {}) {
@@ -153,44 +139,6 @@ export const sessionRules = [
       return {
         detail: `This session has reached ${usd(s.cost)} against a ${usd(cfg.session.costCap)} cap, over ${s.assistantTurns} model turns.`,
         action: "Worth a look at whether the remaining work needs this session's accumulated context, or a clean one.",
-      };
-    },
-  },
-  {
-    id: "premium-light-work",
-    label: "Premium model on light work",
-    check(s, cfg) {
-      if (s.cost < cfg.session.costFloor) return null;
-      const share = s.cost ? premiumCost(s, cfg) / s.cost : 0;
-      if (share < cfg.models.premiumShare) return null;
-      // Size guard. `filesTouched` records what a session *edited*, never what
-      // it read, so "only edited markdown" says nothing about a session that
-      // read fifty source files first. A 900-tool-call session is not light
-      // work whatever landed on disk at the end of it.
-      if (s.totalToolCalls >= cfg.models.lightWorkMaxToolCalls) return null;
-      const files = [...s.filesTouched];
-      const lightByFiles = files.length > 0 && files.every((f) => isLightPath(f, cfg));
-      const lightByTools = s.totalToolCalls < cfg.models.lightWorkToolCalls;
-      if (!lightByFiles && !lightByTools) return null;
-      const why = lightByFiles
-        ? `every file it touched was documentation, tests or markdown (${files.length})`
-        : `it made ${s.totalToolCalls} tool calls`;
-      return {
-        detail: `${pct(share)} of this session's ${usd(s.cost)} ran on a premium model, and ${why}.`,
-        action: "Work this light usually runs well on Claude Sonnet 5 — escalate only when it stalls.",
-      };
-    },
-  },
-  {
-    id: "cache-hit",
-    label: "Low cache hit rate",
-    check(s, cfg) {
-      if (s.assistantTurns < cfg.cache.minTurns) return null;
-      if (s.cacheHitRate === null || s.cacheHitRate >= cfg.cache.minHitRate) return null;
-      return {
-        detail: `Only ${pct(s.cacheHitRate)} of this session's input tokens were served from cache, across ${s.assistantTurns} turns.`,
-        action:
-          "A low hit rate usually means context is being rebuilt rather than continued — restarting instead of resuming, or a prompt whose opening changes every turn.",
       };
     },
   },
@@ -218,18 +166,6 @@ export const sessionRules = [
         detail: `${s.typedPrompts} prompts and ${usd(s.cost)} in one session, with a ${mins(gap)} gap between prompts and work in ${areas.length} areas: ${listed}.`,
         action:
           "Everything from before the gap is still in context after it, and paid for on every turn since. When you come back to a different piece of work, a fresh session costs nothing to start.",
-      };
-    },
-  },
-  {
-    id: "tool-errors",
-    label: "High tool error rate",
-    check(s, cfg) {
-      if (s.totalToolCalls < cfg.toolErrors.minCalls) return null;
-      if (s.toolErrorRate <= cfg.toolErrors.maxRate) return null;
-      return {
-        detail: `${s.toolErrors} of ${s.totalToolCalls} tool calls failed (${pct(s.toolErrorRate)}).`,
-        action: "Failed calls are paid for twice — once to fail, once to retry. Usually a wrong path, a missing binary, or a permission that keeps being denied.",
       };
     },
   },
@@ -327,80 +263,6 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
         detail: `${Math.round(p.elapsedPct)}% through the ${l.label} window with ${l.percent}% of it gone — ${p.pace.toFixed(1)}× the pace that would last. At this rate it runs out in about ${mins(p.exhaustsInMs / 60_000)}, ${mins((p.remainingMs - p.exhaustsInMs) / 60_000)} before it resets.`,
         action:
           "The levers, biggest first: detach MCP servers you are not calling, start a fresh session rather than carrying context you have finished with, and drop to Sonnet for work that does not need more.",
-        sessions: [],
-      });
-    }
-  }
-
-  // Claude Code's own accounting of what is eating your limits. Quoting the
-  // source beats inferring it, and it names the two habits Marmot can only
-  // guess at from transcripts: very long sessions, and very large context.
-  if (cfg.limits?.enabled && attribution?.windows?.length) {
-    const w = attribution.windows[attribution.windows.length - 1]; // the widest window
-    const loud = (w.behaviours ?? []).filter((b) => b.percent >= (cfg.limits.driverMinPercent ?? 60));
-    for (const b of loud) {
-      const long = /sessions?\s+active/i.test(b.text);
-      out.push({
-        id: "limit-drivers",
-        key: `limit-drivers:${w.label}:${b.text.slice(0, 24)}:${Math.floor(b.percent / 10) * 10}`,
-        label: "What is actually eating your limits",
-        detail: `Claude Code attributes ${b.percent}% of your usage over the ${w.label.replace(/^Last\s+/i, "last ")} to usage that ${b.text.replace(/^of your usage\s*/i, "")}. That is across ${num(w.requests)} requests${w.sessions ? ` in ${w.sessions} sessions` : ""}.`,
-        action: long
-          ? "Sessions that stay open carry every earlier turn into every later one. Starting a fresh session at each new piece of work is the single biggest lever here."
-          : "Large context is paid on every turn that carries it. /compact when the early part of a session stops being relevant, and detach MCP servers you are not calling.",
-        sessions: [],
-      });
-    }
-  }
-
-  // A habit, rather than one session. The per-session rule already names each
-  // one; this says the pattern out loud, with what it added up to.
-  const lightPremium = sessions.filter((s) => {
-    if (!s.models || s.cost < cfg.session.costFloor) return null;
-    const share = s.cost ? premiumCost(s, cfg) / s.cost : 0;
-    return share >= cfg.models.premiumShare && s.totalToolCalls < cfg.models.lightWorkToolCalls;
-  });
-  if (lightPremium.length >= cfg.models.lightWorkMinSessions) {
-    const spend = lightPremium.reduce((a, s) => a + s.cost, 0);
-    out.push({
-      id: "premium-window",
-      label: "A habit of premium models on small sessions",
-      detail: `${lightPremium.length} of ${sessions.length} sessions ran on a premium model while making fewer than ${cfg.models.lightWorkToolCalls} tool calls each, ${usd(spend)} in total.`,
-      action:
-        "One light session on the best model is a choice; a standing habit is worth a default. Claude Sonnet 5 handles work this size, and you can escalate the moment it stalls.",
-      sessions: lightPremium.map((s) => s.id),
-    });
-  }
-
-  // Skipped when the caller passed lightweight records: an absent `mcpCalls`
-  // would make every configured server look idle.
-  if (cfg.mcp.enabled && includeMcp) {
-    const configured = configuredOverride ?? configuredServers(root, cwd);
-    const called = new Set(sessions.flatMap((s) => Object.keys(s.mcpCalls ?? {})));
-    const idle = configured.filter((c) => !called.has(c));
-    if (idle.length) {
-      // `marmot mcp-audit` measures what each server's definitions cost. If it
-      // has been run, quote the real figure rather than gesturing at it.
-      const measured = idle.map((n) => mcpSizes?.servers?.[n]).filter((m) => m && !m.error && m.tokens);
-      const idleTokens = measured.reduce((a, m) => a + m.tokens, 0);
-      const baselines = sessions.map((s) => s.baselineTokens).filter((n) => typeof n === "number");
-      const baseline = baselines.length ? baselines.sort((a, b) => a - b)[Math.floor(baselines.length / 2)] : null;
-
-      let detail = `${idle.join(", ")} — configured, and not invoked once in this window.`;
-      if (idleTokens) {
-        detail += ` Their tool definitions are ~${num(idleTokens)} tokens, sent with every request`;
-        detail += baseline ? ` — ${pct(idleTokens / baseline)} of your ${tokens(baseline)} median session prefix.` : ".";
-      } else if (baseline) {
-        detail += ` Your median session carries ${tokens(baseline)} of prefix before you type; every attached server's definitions ride inside it.`;
-      }
-
-      out.push({
-        id: "mcp-idle",
-        label: "MCP servers attached but never called",
-        detail,
-        action: idleTokens
-          ? "Detaching what you do not use is a straight saving on every request."
-          : "Every attached server's tool definitions are sent with each request. `marmot mcp-audit` measures exactly what each one costs.",
         sessions: [],
       });
     }
