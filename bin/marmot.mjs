@@ -667,7 +667,8 @@ async function mcpSizes(dirs = []) {
 // Every directory the window's sessions ran in. Using these rather than the
 // one you happen to be standing in is what makes the report identical from
 // anywhere on the machine.
-const { configuredServers, sessionDirs } = await import("../src/sessions.mjs");
+const sessionsMod = await import("../src/sessions.mjs");
+const { configuredServers, sessionDirs } = sessionsMod;
 const WINDOW_DIRS = DEMO ? [] : [...sessionDirs(sessions), process.cwd()];
 const MCP_SIZES = await mcpSizes(WINDOW_DIRS);
 
@@ -695,10 +696,36 @@ const PLAN = DEMO
 
 const ATTRIBUTION = DEMO ? null : (await import("../src/plan.mjs")).readAttribution(ROOT);
 
+const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, WINDOW_DIRS);
+const SERVER_CONFIGS = DEMO ? {} : (await import("../src/mcp.mjs")).readServerConfigs(ROOT, WINDOW_DIRS);
+
+/** What the diagnoses read: everything measured, in one place. */
+function diagnoseContext(session) {
+  const { mcpLastUsed, daysSince } = sessionsMod;
+  const called = {};
+  for (const s of sessions) for (const [srv, n] of Object.entries(s.mcpCalls ?? {})) called[srv] = (called[srv] ?? 0) + n;
+  const baselines = sessions.map((s) => s.baselineTokens).filter((n) => typeof n === "number").sort((a, b) => a - b);
+  const t = session?.tokens;
+  return {
+    session,
+    sessionTokens: t ? t.input + t.output + t.cacheRead + t.cacheWrite : 0,
+    premium: cfg.models.premium,
+    attribution: ATTRIBUTION,
+    mcp: {
+      configured: CONFIGURED,
+      called,
+      sizes: MCP_SIZES,
+      daysSince: daysSince(mcpLastUsed(sessions)),
+      baseline: baselines.length ? baselines[Math.floor(baselines.length / 2)] : null,
+    },
+  };
+}
+
 const nudges = evaluate(sessions, cfg, {
   root: ROOT,
   plan: PLAN,
   attribution: ATTRIBUTION,
+  diagnose: diagnoseContext(sessions.slice().sort((a, b) => b.cost - a.cost)[0] ?? null),
   cwd: DEMO ? null : process.cwd(),
   configured: DEMO ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, WINDOW_DIRS),
   mcpSizes: MCP_SIZES,
@@ -810,8 +837,6 @@ if (cmd === "sessions") {
 const SKILL_SIZES = DEMO
   ? (await import("../src/demo.mjs")).demoSkillSizes
   : (await import("../src/skills.mjs")).skillSizes({ root: ROOT, cwd: process.cwd() });
-const CONFIGURED = DEMO ? ["github", "sentry", "postgres", "datadog"] : configuredServers(ROOT, WINDOW_DIRS);
-const SERVER_CONFIGS = DEMO ? {} : (await import("../src/mcp.mjs")).readServerConfigs(ROOT, WINDOW_DIRS);
 process.stdout.write(renderReport(sessions, cfg, { days: DAYS, nudges, demo: DEMO, skillSizes: SKILL_SIZES, mcpSizes: MCP_SIZES, configuredServers: CONFIGURED, plan: PLAN, attribution: ATTRIBUTION, serverConfigs: SERVER_CONFIGS }));
 
 // `--sessions` adds every session under the report; the page follows unless

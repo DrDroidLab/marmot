@@ -63,6 +63,11 @@ export const DEFAULTS = {
   // dollars are already paid, and what you are actually spending is allowance.
   limits: {
     enabled: true,
+    // How much of the burn an explanation must account for before it is worth
+    // putting in a notification. Below this the nudge goes out with the
+    // threshold alone rather than a weak guess.
+    causeFloor: 0.08,
+
     // Marks on the way to a limit, as a percentage of it. Crossing each one
     // speaks once, so you hear "half gone" long before "nearly out" — a single
     // cap can only ever tell you the second.
