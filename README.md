@@ -44,23 +44,43 @@ the same warning after every turn.
 ## See where the tokens went
 
 ```bash
-marmot browse
+marmot
 ```
 
-![Marmot's local session browser showing usage, model, skill and MCP trends](docs/browse-index.png)
+```text
+  Marmot · your last 30 days
+  40 sessions · everything below was read from ~/.claude/projects on this machine
 
-Open a session to see its token split, cost per turn, prompts, replies and tool
-calls. Tool-result bodies are never included.
+  Spend              $4,184     modelled at published rates
+  Prompts you typed  926        per session: 23.1 mean · 16 median · 79 p99
+  Tokens             5.8B       input, output and cache
+  Cache hit rate     98%        higher is cheaper
+  Tool calls         13,768     3% failed
+  Baseline context   35.3K      median, before you type
 
-<details>
-<summary><strong>See a session timeline</strong></summary>
+  Daily              ▃▂▄▁▃█▆▃▂▁▄▁▂▆▁▅▄▅  peak $671 · median $233
 
-![A single Claude Code session with its cost-per-turn chart and event timeline](docs/browse-session.png)
+  Where it went
+  claude-opus-5      $4,092     98% · 5.7B tokens
+  claude-sonnet-5    $92        2% · 104M tokens
 
-</details>
+  Tools failing
+  Bash                        126 of  4,933    3%
+  mcp__supabase__execute_sql    3 of      3  100%
 
-The browser is one local HTML file with no CDN, analytics, web fonts or network
-calls.
+  Skills
+  dataviz            6×         ~4.1K tokens to load
+
+  MCP servers
+  github            142×  26 tools · ~4.0K tokens
+  sentry              0×  14 tools · ~2.3K tokens  ▲ never called
+                    18,825 tokens on every request, 16,262 of them idle
+```
+
+The report gives every figure a window and a source. Run `marmot browse` when
+you want to open a session and follow a number down to the turn that caused it.
+The browser is one local HTML file with no network calls; `browse --no-text`
+leaves prompts and replies out.
 
 ## Commands
 
@@ -105,10 +125,10 @@ Run `marmot --help` for the complete reference.
 Every check is deterministic. No model decides whether to nudge you.
 
 Most of those are **causes rather than alarms**. What interrupts you is a
-threshold — half, three quarters, then nine tenths of a plan window — and the
-nudge carries whichever cause best explains getting there, quantified:
+threshold—half, three quarters, then nine tenths of a plan window—and the nudge
+carries whichever cause best explains getting there:
 
-```
+```text
 ▲ 75% of your weekly limit
   76% of your weekly limit is gone on Max 20×. It resets in 2.1d.
   Each turn re-sends 603K tokens of history, over 57 prompts and 3.8d.
@@ -116,10 +136,37 @@ nudge carries whichever cause best explains getting there, quantified:
 ```
 
 Causes are ranked by how much each explains, how confident Marmot is, and how
-cheaply it can be fixed — a setting beats a habit at the same share. `marmot`
-prints that ranking under **Why it is going**, scores included, so the choice
-can be argued with. When nothing scores highly enough, the nudge still fires
-with the threshold alone rather than an invented reason.
+cheaply it can be fixed. `marmot` prints that ranking under **Why it is going**,
+scores included. When nothing scores highly enough, the threshold still fires
+without an invented reason.
+
+## When Marmot speaks
+
+Rules in the `live` list can interrupt at the end of a turn—the moment you can
+still change the session in front of you. Everything else waits for the daily
+digest.
+
+A rule speaks once per session. Cost warnings can return when the cost doubles,
+and plan warnings return at the configured marks. One live nudge also buys 20
+minutes of quiet before another can interrupt; held findings remain in the
+report and digest.
+
+## Dollars or allowance
+
+On a subscription, the dollar figure is labelled **Modelled spend**. It is what
+the tokens would cost at published API rates, not what you pay. Marmot also
+shows the plan limits Claude Code exposes locally:
+
+```text
+  Modelled spend        $1,825    at API rates — not what you pay on Max 20×
+  5-hour session limit  5%        resets in 1.2h
+  Weekly limit          19%       resets in 3.0d
+  Usage credits         $0.00 of $50.00   real money, beyond the plan
+```
+
+On pay-as-you-go usage, the same dollar figure is labelled **Spend** because it
+is the bill. Marmot uses percentage limits when the plan reports them and dollar
+caps when it does not.
 
 ## Configuration
 
@@ -228,24 +275,25 @@ it resets:
 
 | Rule | Fires when | Default |
 |---|---|---|
-| `session-turns` | Prompts typed in one session, with no compaction | > 20 |
 | `session-cost` | One session's modelled cost | > $25 |
 | `daily-cost` | Today's total | > $50 |
 | `daily-baseline` | Today against your trailing average | > 2.5σ over 14 days |
-| `premium-light-work` | Premium-model share on a small session | > 70% and < 10 tool calls, or docs/tests only |
-| `cache-hit` | Input tokens served from cache | < 70% over ≥ 20 turns |
-| `tool-errors` | Failed tool calls | > 10% over ≥ 20 calls |
-| `mcp-idle` | Configured servers never invoked | any |
 | `session-topics` | A long session resumed in a different area | > 1 day gap, ≥ 2 areas |
-| `premium-window` | Premium models repeatedly used on small sessions | ≥ 5 sessions |
+| `limit-reached` | A plan window crosses a configured mark | 50%, 75%, 90% |
+| `limit-pace` | Allowance is disappearing faster than the window | > 1.5× pace, ≥ 15% elapsed, ≥ 20% used |
+| `limit-drivers` | Claude Code attributes a large share to one behavior | > 60% |
+
+Idle MCP servers, subagent burn, carried history, quiet premium-model work and
+failing tools are now ranked as **causes** behind these thresholds. They explain
+a nudge instead of creating a second, duplicated alarm.
 
 ### The keys people actually change
 
 ```jsonc
 {
   // Rules allowed to interrupt at the end of a turn.
-  "live": ["session-cost", "daily-cost", "daily-baseline",
-           "session-turns", "limit-reached"],
+  "live": ["limit-reached", "session-cost", "daily-cost",
+           "daily-baseline"],
 
   "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
@@ -254,7 +302,8 @@ it resets:
 
   "digest": { "cadence": "daily" },
 
-  "limits": { "enabled": true, "steps": [50, 75, 90],
+  "limits": { "enabled": true, "causeFloor": 0.08,
+              "steps": [50, 75, 90],
               "autoRefresh": true, "paceRatio": 1.5,
               "paceMinElapsed": 15, "paceMinUsed": 20,
               "driverMinPercent": 60 },
@@ -287,6 +336,20 @@ $12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
 
 The statusline is separate because installing it replaces an existing Claude
 Code statusline.
+
+## Why you can trust the numbers
+
+Claude Code writes one JSONL entry per response content block, and each entry
+repeats the same usage object. Marmot counts usage once per API response;
+summing every entry would inflate a tool-heavy session by roughly 1.9×.
+
+Cache writes are also priced at their recorded lifetime: 1.25× input price for
+five minutes and 2× for one hour. Treating every write as the cheaper kind can
+understate a heavy session by about a fifth.
+
+A turn means a prompt you typed. Tool results also appear as `user` entries in
+Claude Code's records, but Marmot does not count them as human prompts. These
+cases are pinned by the test suite.
 
 ## Good to know
 
