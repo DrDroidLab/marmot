@@ -18,12 +18,12 @@ const statePath = (root = defaultRoot()) => join(root, "marmot-state.json");
 
 export function readState(root) {
   const p = statePath(root);
-  if (!existsSync(p)) return { digestShownOn: null, fired: {} };
+  if (!existsSync(p)) return { digestShownOn: null, fired: {}, lastNudgeAt: null };
   try {
     const s = JSON.parse(readFileSync(p, "utf8"));
-    return { digestShownOn: s.digestShownOn ?? null, fired: s.fired ?? {} };
+    return { digestShownOn: s.digestShownOn ?? null, fired: s.fired ?? {}, lastNudgeAt: s.lastNudgeAt ?? null };
   } catch {
-    return { digestShownOn: null, fired: {} };
+    return { digestShownOn: null, fired: {}, lastNudgeAt: null };
   }
 }
 
@@ -40,6 +40,22 @@ export function writeState(state, root) {
   } catch {
     /* an unwritable state file costs dedupe, not the nudge */
   }
+}
+
+/**
+ * Whether enough quiet has passed since the last live nudge.
+ *
+ * Crossing 50% and 75% of a window inside the same minute is two true things
+ * and one interruption too many; the second waits. Kept in the state file so it
+ * holds across the many short-lived hook processes a session spawns.
+ */
+export function withinQuietPeriod(state, minGapMins = 20, now = Date.now()) {
+  const last = state.lastNudgeAt;
+  return typeof last === "number" && now - last < minGapMins * 60_000;
+}
+
+export function markNudged(state, now = Date.now()) {
+  state.lastNudgeAt = now;
 }
 
 /** True when this rule has something new to say about this session. */

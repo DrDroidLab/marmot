@@ -201,10 +201,17 @@ const bigDay = [
 ];
 const opts = (plan) => ({ today: "2026-09-01", includeMcp: false, plan });
 
+/** A plan that reports quota, which is what makes dollars the wrong ceiling. */
+const withQuota = (name = "Max 20×") => ({
+  plan: name,
+  ageMins: 2,
+  limits: [{ kind: "weekly_all", label: "weekly", percent: 10, resetsAt: new Date(Date.now() + 200_000_000).toISOString(), active: true }],
+});
+
 test("a subscription is not nudged about dollars it was never charged", () => {
   // $511 in a day on Max 20x is a Tuesday, not overspending. A rule that says
   // otherwise every day gets muted along with the ones worth reading.
-  const max = { plan: "Max 20×", ageMins: 2, limits: [] };
+  const max = withQuota();
   assert.equal(windowRules(bigDay, DEFAULTS, opts(max)).find((w) => w.id === "daily-cost"), undefined);
 
   const sessionCost = sessionRules.find((r) => r.id === "session-cost");
@@ -226,7 +233,7 @@ test("an undetected plan is treated as billed, which is the safe way round", () 
 });
 
 test("a subscription still hears about waste, which is the point", () => {
-  const max = { plan: "Max 20×", ageMins: 2, limits: [] };
+  const max = withQuota();
   const wasteful = {
     ...bigDay[0],
     typedPrompts: 60,
@@ -242,7 +249,7 @@ test("a subscription still hears about waste, which is the point", () => {
 });
 
 test("evaluate passes the plan down to the session rules", () => {
-  const max = { plan: "Max 20×", ageMins: 2, limits: [] };
+  const max = withQuota();
   const onMax = evaluate(bigDay, DEFAULTS, { ...opts(max) });
   const onApi = evaluate(bigDay, DEFAULTS, { ...opts({ plan: "API", limits: [] }) });
   assert.equal(onMax.sessionNudges.find((g) => g.id === "session-cost"), undefined);
@@ -522,4 +529,18 @@ test("a saved attribution is read back, and a broken one is null", (t) => {
 
   writeFileSync(attributionPath(root), "{ broken");
   assert.equal(readAttribution(root), null);
+});
+
+test("a plan with no quota falls back to a dollar ceiling", () => {
+  // Enterprise usually reports no percentages. Staying quiet there would leave
+  // no budget at all, so money becomes the only ceiling available.
+  const noQuota = { plan: "Enterprise", ageMins: 2, limits: [] };
+  assert.ok(windowRules(bigDay, DEFAULTS, opts(noQuota)).find((w) => w.id === "daily-cost"));
+
+  // And a plan whose quota reading has expired is in the same position.
+  const expired = { plan: "Max 20×", ageMins: 2, limits: [{ kind: "weekly_all", label: "weekly", percent: 10, expired: true }] };
+  assert.ok(windowRules(bigDay, DEFAULTS, opts(expired)).find((w) => w.id === "daily-cost"));
+
+  // But while the quota is readable, the quota is the ceiling.
+  assert.equal(windowRules(bigDay, DEFAULTS, opts(withQuota())).find((w) => w.id === "daily-cost"), undefined);
 });

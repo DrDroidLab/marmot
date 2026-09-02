@@ -72,6 +72,7 @@ marmot nudges             # show only actionable findings
 marmot sessions           # list sessions one per line
 marmot mcp-audit          # measure MCP tool-definition weight
 marmot config             # open your thresholds
+marmot remind             # show or change when nudges fire
 marmot doctor             # check readers, hooks and notifications
 marmot test-notification  # send a test nudge
 ```
@@ -134,6 +135,27 @@ marmot config --print  # print it in the terminal
 Nothing needs restarting—the next run reads it. Marmot uses `$VISUAL`, then
 `$EDITOR`, then the platform default. A terminal editor is used only when there
 is a terminal to attach it to.
+
+### Reminders
+
+```bash
+marmot remind                      # show what fires and when
+marmot remind --at 50,75,90        # set quota marks
+marmot remind --cap 100            # set a dollar ceiling
+marmot remind --off                # turn reminders off
+```
+
+Marmot chooses the useful ceiling from the plan it can read:
+
+| Plan | Ceiling |
+|---|---|
+| **Pro, Max, most Team seats** | Reported quota, at 50%, 75% and 90% by default |
+| **Enterprise or a plan reporting no quota** | Daily dollar cap; session cap is half |
+| **Pay-as-you-go API** | Dollar cap, because the figure is the bill |
+
+Only one live nudge interrupts at a time. After one fires, Marmot leaves 20
+minutes of quiet before another (`interrupt.minGapMins`). Held findings remain
+in `marmot` and the daily digest.
 
 ### What Claude Code says is eating your limits
 
@@ -207,6 +229,8 @@ it resets:
   // Rules allowed to interrupt at the end of a turn.
   "live": ["session-cost", "daily-cost", "daily-baseline",
            "session-turns", "limit-reached"],
+
+  "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
   "notify": { "desktop": true, "bell": true, "app": null,
               "sound": "Ping", "persist": true },

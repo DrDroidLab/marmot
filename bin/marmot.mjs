@@ -51,6 +51,7 @@ if (has("help") || cmd === "help") {
     config set k=v    Change a threshold without opening an editor
     mcp-audit         Ask each configured MCP server for its tools, and measure
                       what their definitions cost on every request
+    remind            Show or set when a nudge fires: --at 50,75,90, --cap 100
     test-notification Send one, and say what it did and where to look
     doctor            What is readable on this machine, and what is not
 
@@ -489,6 +490,80 @@ async function runBrowse() {
     execFile(opener, [out], () => {});
   }
   return true;
+}
+
+if (cmd === "remind" || cmd === "reminders") {
+  const { readPlan, usableLimits } = await import("../src/plan.mjs");
+  const { limitSteps } = await import("../src/rules.mjs");
+  const plan = has("demo") ? { plan: "Max 20×", limits: [] } : readPlan(ROOT);
+  const hasQuota = usableLimits(plan).length > 0 || (plan.plan && !["API", null].includes(plan.plan) && plan.limits.length > 0);
+
+  const write = (patch) => {
+    const body = existsSync(cfg._path) ? JSON.parse(readFileSync(cfg._path, "utf8")) : (() => { const { _path, _exists, ...d } = { ...DEFAULTS }; return d; })();
+    for (const [path, value] of Object.entries(patch)) {
+      const keys = path.startsWith("limits.byPlan.") ? ["limits", "byPlan", path.slice("limits.byPlan.".length)] : path.split(".");
+      let node = body;
+      for (const k of keys.slice(0, -1)) {
+        if (typeof node[k] !== "object" || node[k] === null || Array.isArray(node[k])) node[k] = {};
+        node = node[k];
+      }
+      node[keys[keys.length - 1]] = value;
+    }
+    writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
+    return body;
+  };
+
+  // `--at 50,75,90` sets the quota marks; `--cap 100` the dollar ceiling for a
+  // plan that exposes no quota to measure against.
+  const at = flag("at", null);
+  const cap = flag("cap", null);
+  const changed = {};
+  if (at !== null) {
+    const steps = String(at).split(",").map((n) => Number(n.trim())).filter((n) => Number.isFinite(n) && n > 0 && n <= 100).sort((a, b) => a - b);
+    if (!steps.length) {
+      process.stderr.write("marmot remind --at takes percentages, e.g. --at 50,75,90\n");
+      process.exit(1);
+    }
+    // Both, deliberately: `byPlan` takes precedence over `steps`, so setting
+    // only the shared default would silently do nothing on a plan that has an
+    // entry — which is every plan we recognise.
+    changed["limits.steps"] = steps;
+    if (plan.plan) changed[`limits.byPlan.${plan.plan}`] = steps;
+    changed["limits.enabled"] = true;
+  }
+  if (cap !== null) {
+    const n = Number(cap);
+    if (!Number.isFinite(n) || n <= 0) {
+      process.stderr.write("marmot remind --cap takes an amount, e.g. --cap 100\n");
+      process.exit(1);
+    }
+    changed["daily.costCap"] = n;
+    changed["session.costCap"] = Math.max(1, Math.round(n / 2));
+  }
+  if (has("off")) changed["limits.enabled"] = false;
+  if (has("on")) changed["limits.enabled"] = true;
+  if (Object.keys(changed).length) write(changed);
+
+  const now = loadConfig(ROOT);
+  const steps = limitSteps(now, plan.plan);
+  process.stdout.write(`\n  ${bold("Reminders")}${plan.plan ? dim(` · ${plan.plan}`) : ""}\n\n`);
+  if (!now.limits?.enabled) {
+    process.stdout.write(`  Off. ${dim("marmot remind --on")}\n`);
+  } else if (hasQuota) {
+    process.stdout.write(`  At ${bold(steps.length ? steps.map((n) => `${n}%`).join(", ") : "no marks set")} of each plan window — the 5-hour one and the week.\n`);
+    process.stdout.write(dim(`  Your plan reports quota, so these are what run out. Dollar caps stay quiet.\n`));
+  } else {
+    process.stdout.write(`  Your plan reports no quota, so the ceiling is money: ${bold(usd(now.daily.costCap))} a day, ${bold(usd(now.session.costCap))} a session.\n`);
+    process.stdout.write(dim(`  Change it with --cap.\n`));
+  }
+  process.stdout.write(`  At most one interruption every ${bold(`${now.interrupt?.minGapMins ?? 20} minutes`)}; the rest wait for the digest.\n`);
+  process.stdout.write(`
+  ${dim("marmot remind --at 50,75,90")}   quota marks, as percentages
+  ${dim("marmot remind --cap 100")}       dollar ceiling, for plans without quota
+  ${dim("marmot remind --off")}           stop them
+
+`);
+  process.exit(0);
 }
 
 if (cmd === "test-notification" || cmd === "test-notif") {
