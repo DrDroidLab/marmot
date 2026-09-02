@@ -10,8 +10,13 @@
   <a href="https://discord.gg/AQ3tusPtZn"><img src="https://img.shields.io/badge/Discord-join_the_den-5865F2?logo=discord&logoColor=white" alt="Join the Discord"></a>
 </p>
 
-Marmot reads Claude Code's local session records, shows where the tokens went,
-and nudges you while changing course can still save the next turn.
+Marmot reads the session records Claude Code already keeps on your machine and
+points out where tokens are being wasted: context that has outlived the task,
+MCP tools that are loaded but never called, poor cache reuse, repeated tool
+failures, or a costly model doing light work.
+
+The useful part is timing. Marmot can nudge you at the end of a turn, while
+starting fresh, compacting, or changing course can still save the next one.
 
 ## Install
 
