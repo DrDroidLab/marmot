@@ -2,13 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readState, writeState, shouldFire, markFired } from "../src/state.mjs";
+import { readState, writeState, shouldFire, markFired, withinQuietPeriod, markNudged } from "../src/state.mjs";
 import { tmpRoot } from "./helpers.mjs";
 
 test("a fresh machine starts with nothing said", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
-  assert.deepEqual(readState(root), { digestShownOn: null, fired: {} });
+  assert.deepEqual(readState(root), { digestShownOn: null, fired: {}, lastNudgeAt: null });
 });
 
 test("state round-trips through disk", (t) => {
@@ -85,14 +85,14 @@ test("a malformed state file costs dedupe, not the nudge", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
   writeFileSync(join(root, "marmot-state.json"), "{ not json");
-  assert.deepEqual(readState(root), { digestShownOn: null, fired: {} });
+  assert.deepEqual(readState(root), { digestShownOn: null, fired: {}, lastNudgeAt: null });
 });
 
 test("a state file missing its fields degrades to the defaults", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
   writeFileSync(join(root, "marmot-state.json"), JSON.stringify({ somethingElse: 1 }));
-  assert.deepEqual(readState(root), { digestShownOn: null, fired: {} });
+  assert.deepEqual(readState(root), { digestShownOn: null, fired: {}, lastNudgeAt: null });
 });
 
 test("an unwritable location does not throw", () => {
@@ -108,4 +108,25 @@ test("the written file is readable JSON", (t) => {
   writeState(s, root);
   const parsed = JSON.parse(readFileSync(join(root, "marmot-state.json"), "utf8"));
   assert.equal(parsed.fired["s1:session-cost"], 5);
+});
+
+test("a live nudge buys quiet for a while afterwards", () => {
+  // Crossing 50% and 75% of a window in the same minute is two true things and
+  // one interruption too many.
+  const state = { digestShownOn: null, fired: {}, lastNudgeAt: null };
+  assert.equal(withinQuietPeriod(state, 20), false, "nothing has been said yet");
+
+  markNudged(state, Date.now());
+  assert.equal(withinQuietPeriod(state, 20), true);
+  assert.equal(withinQuietPeriod(state, 20, Date.now() + 19 * 60_000), true);
+  assert.equal(withinQuietPeriod(state, 20, Date.now() + 21 * 60_000), false, "and then it may speak again");
+});
+
+test("the quiet period survives the many short-lived hook processes", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = readState(root);
+  markNudged(s, 1_700_000_000_000);
+  writeState(s, root);
+  assert.equal(readState(root).lastNudgeAt, 1_700_000_000_000);
 });

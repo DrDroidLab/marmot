@@ -79,6 +79,7 @@ you**, and every threshold is yours to move.
 | Command | What it does |
 |---|---|
 | `marmot` | Nudges, plus the window they came from |
+| `marmot remind` | Show or set when a nudge fires |
 | `marmot config` | Open the thresholds file; `config set k=v` changes one |
 | `marmot browse` | Build the session browser page and open it |
 | `marmot nudges` | Just the nudges, nothing else |
@@ -433,6 +434,28 @@ transcript cannot see directly. `limit-drivers` quotes it when a share passes
 It is human-formatted text with no stability guarantee, so it is parsed the way
 the transcript readers are written: every line optional, anything unrecognised
 skipped, a format change costing the section rather than the report.
+
+### Reminders
+
+```bash
+marmot remind                      # what fires, and when
+marmot remind --at 50,75,90        # quota marks, as percentages
+marmot remind --cap 100            # a dollar ceiling, for plans without quota
+marmot remind --off
+```
+
+Which of those two applies is decided by your plan, not by you having to know:
+
+| Your plan | The ceiling |
+|---|---|
+| **Pro, Max, most Team seats** | The quota your plan reports. Marks at **50%, 75%, 90%** of the 5-hour window and the week, overridable with `--at`. Dollar caps stay quiet, because the money is already spent. |
+| **Enterprise, or any plan reporting no quota** | Money, since there is no percentage to measure. A daily cap — `--cap 100` sets it, and a session cap at half. |
+| **Pay-as-you-go API** | Money, because there the figure really is the bill. |
+
+**One interruption at a time.** Crossing 50% and 75% inside the same minute is
+two true things and one interruption too many, so a live nudge buys twenty
+minutes of quiet (`interrupt.minGapMins`). Nothing is lost — whatever was held
+back is still in `marmot` and in tomorrow's digest.
 
 ### Limit thresholds
 

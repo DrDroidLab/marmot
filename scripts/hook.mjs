@@ -23,7 +23,7 @@ import { loadSessions, readSession, defaultRoot, byDay } from "../src/sessions.m
 import { loadConfig } from "../src/config.mjs";
 import { evaluate, sessionRules, windowRules } from "../src/rules.mjs";
 import { renderNudges } from "../src/render.mjs";
-import { readState, writeState, shouldFire, markFired } from "../src/state.mjs";
+import { readState, writeState, shouldFire, markFired, withinQuietPeriod, markNudged } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
 import { alert } from "../src/notify.mjs";
 import { readPlan, refreshUsage, worthRefreshing, readAttribution } from "../src/plan.mjs";
@@ -139,15 +139,30 @@ if (live.has("daily-cost") || live.has("daily-baseline") || live.has("limit-reac
   }
 }
 
+if (!lines.length) {
+  writeState(state, root);
+  process.exit(0);
+}
+
+// One interruption at a time, and not again for a while. Everything held back
+// is still waiting in the daily digest and in `marmot`, so nothing is lost —
+// it just does not arrive as a third popup inside ten minutes.
+if (withinQuietPeriod(state, cfg.interrupt?.minGapMins ?? 20)) {
+  writeState(state, root);
+  process.exit(0);
+}
+
+const show = lines.slice(0, Math.max(1, cfg.interrupt?.maxPerNudge ?? 1));
+markNudged(state);
 writeState(state, root);
-if (!lines.length) process.exit(0);
 
 alert(cfg, {
-  title: `Marmot · ${lines[0].label}`,
-  body: lines.length > 1 ? `${lines[0].detail} (+${lines.length - 1} more)` : lines[0].detail,
+  title: `Marmot · ${show[0].label}`,
+  body: lines.length > 1 ? `${show[0].detail} (+${lines.length - 1} more)` : show[0].detail,
 });
 
 emit(
   event,
-  lines.map((l) => `Marmot · ${l.label}\n  ${l.detail}\n  ${l.action}`).join("\n\n"),
+  show.map((l) => `Marmot · ${l.label}\n  ${l.detail}\n  ${l.action}`).join("\n\n") +
+    (lines.length > show.length ? `\n\n  ${lines.length - show.length} more in \`marmot\` and tomorrow's digest.` : ""),
 );

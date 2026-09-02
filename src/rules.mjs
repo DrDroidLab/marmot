@@ -34,16 +34,20 @@ const isLightPath = (p, cfg) => {
 };
 
 /**
- * Whether an absolute dollar cap means anything on this plan.
+ * Whether a dollar cap is the right ceiling for this plan.
  *
- * On a subscription the money is already spent, so "$511 today against a $50
- * cap" is not overspending — it is a Tuesday, and a rule that says otherwise
- * every single day gets muted along with the ones worth reading. Absolute
- * dollar caps apply to pay-as-you-go, and to an unknown plan, where the figure
- * really is the bill. Everything else on a subscription is judged against your
- * own normal or against the plan's own limits.
+ * Three cases, and the middle one is the reason this is not a one-liner:
+ *
+ *   - **Pay-as-you-go**, or a plan we could not identify: the figure is the
+ *     bill, so a dollar cap is exactly right.
+ *   - **A plan with quota** — Pro, Max, most Team seats: the money is already
+ *     spent, and "$511 today against a $50 cap" is a Tuesday. The quota is the
+ *     real ceiling, so dollars stay quiet.
+ *   - **A plan without quota**, which is where Enterprise usually lands: no
+ *     percentages to work with, so a dollar cap is the only ceiling available.
+ *     Silence here would mean no budget at all.
  */
-const dollarsAreBilled = (plan) => !plan?.plan || paysPerToken(plan.plan);
+const dollarsAreBilled = (plan) => !plan?.plan || paysPerToken(plan.plan) || usableLimits(plan).length === 0;
 
 /**
  * The areas of the tree a session worked in, oldest first.
