@@ -62,6 +62,15 @@ Also there: `usage.speed === "fast"` means fast mode, priced at $10/$50 on Opus.
 `<synthetic>` model turns are locally generated and never billed — skip them
 silently rather than reporting them as unpriced.
 
+### 4. A subagent's work is in a different file
+
+`projects/<project>/<id>.jsonl` does not contain what a subagent did. That goes
+to `projects/<project>/<id>/subagents/agent-*.jsonl`, a directory deeper, and a
+reader that only globs `*.jsonl` at the top level misses it completely — which
+means missing the spend, not just the attribution. `sessionFiles(root, {
+subagents: true })` walks them, and `loadSessions` folds each into the session
+named by its parent directory.
+
 ### Everything else
 
 Be defensive. A malformed line is skipped, an unknown shape degrades to a partial

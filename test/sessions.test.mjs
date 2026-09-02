@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync, utimesSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { readSession, loadSessions, sessionFiles, configuredServers, byDay, byProject, sessionDirs } from "../src/sessions.mjs";
+import { readSession, loadSessions, sessionFiles, configuredServers, byDay, byProject, sessionDirs, mcpLastUsed, daysSince } from "../src/sessions.mjs";
 import { tmpRoot, writeSession, writeRaw, prompt, notPrompt, toolResult, toolUse, response, usage, compaction } from "./helpers.mjs";
 
 const read = (root, f) => readSession(f);
@@ -584,4 +584,116 @@ test("configured servers are the same from any directory in the window", (t) => 
   const dirs = ["/work/one", "/work/two"];
   assert.deepEqual(configuredServers(claude, dirs).sort(), ["everywhere", "onlyOne", "onlyTwo"]);
   assert.deepEqual(configuredServers(claude, ["/work/one"]).sort(), ["everywhere", "onlyOne"]);
+});
+
+/* ── what subagents cost, and where that is written ────────────────────── */
+
+test("a subagent's spend is folded into the session that spawned it", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  // Claude Code writes subagent work a directory deeper, not into the parent
+  // transcript. Missing it means missing the spend entirely.
+  writeSession(root, {
+    project: "-repo",
+    id: "parent",
+    entries: [prompt("go"), response({ id: "m1", u: usage({ output: 1000, cacheRead: 10_000 }), text: "main" })],
+  });
+  mkdirSync(join(root, "projects", "-repo", "parent", "subagents"), { recursive: true });
+  writeFileSync(
+    join(root, "projects", "-repo", "parent", "subagents", "agent-1.jsonl"),
+    response({ id: "a1", u: usage({ output: 4000, cacheRead: 20_000 }), text: "subagent work", sidechain: true })
+      .map((e) => JSON.stringify(e))
+      .join("\n"),
+  );
+
+  const [s] = loadSessions({ root, days: 30 });
+  assert.equal(s.id, "parent", "the subagent is not a session of its own");
+  assert.equal(s.assistantTurns, 2, "its turns count towards the parent");
+  assert.equal(s.tokens.output, 5000, "and so do its tokens");
+  assert.equal(s.sidechain.turns, 1, "while still being attributable to subagents");
+  assert.ok(s.sidechain.cost > 0);
+  assert.ok(s.sidechain.cost < s.cost, "which is a share of the whole, not the whole");
+});
+
+test("sessionFiles only walks into subagents when asked", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  writeSession(root, { project: "-repo", id: "parent", entries: [prompt("x")] });
+  mkdirSync(join(root, "projects", "-repo", "parent", "subagents"), { recursive: true });
+  writeFileSync(join(root, "projects", "-repo", "parent", "subagents", "agent-1.jsonl"), "{}");
+
+  assert.deepEqual([...sessionFiles(root)].map((f) => f.id), ["parent"]);
+  const withSubs = [...sessionFiles(root, { subagents: true })];
+  assert.equal(withSubs.length, 2);
+  assert.equal(withSubs.find((f) => f.parentId)?.parentId, "parent", "and it knows who pays");
+});
+
+/* ── the measurements the nudges need ──────────────────────────────────── */
+
+test("history is the context carried into a turn, now and at its worst", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        response({ id: "m1", u: usage({ input: 100, cacheRead: 50_000, output: 10 }), text: "a" }),
+        response({ id: "m2", u: usage({ input: 100, cacheRead: 900_000, output: 10 }), text: "b" }),
+        response({ id: "m3", u: usage({ input: 100, cacheRead: 300_000, output: 10 }), text: "c" }),
+      ],
+    }),
+  );
+  assert.equal(s.history.last, 300_100, "where the session is now");
+  assert.equal(s.history.peak, 900_100, "and the worst it got");
+});
+
+test("a quiet run is consecutive turns on one model that produced almost nothing", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const quiet = (i) => response({ id: `q${i}`, model: "claude-opus-5", u: usage({ output: 50 }), text: "ok" });
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        quiet(1), quiet(2), quiet(3),
+        // Real work breaks the run.
+        response({ id: "big", model: "claude-opus-5", u: usage({ output: 8000 }), text: "a long answer" }),
+        quiet(4), quiet(5),
+      ],
+    }),
+  );
+  assert.equal(s.longestQuietRun.turns, 3);
+  assert.equal(s.longestQuietRun.model, "claude-opus-5");
+});
+
+test("switching model breaks the run too", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = read(
+    root,
+    writeSession(root, {
+      entries: [
+        response({ id: "a", model: "claude-opus-5", u: usage({ output: 50 }), text: "x" }),
+        response({ id: "b", model: "claude-sonnet-5", u: usage({ output: 50 }), text: "x" }),
+        response({ id: "c", model: "claude-sonnet-5", u: usage({ output: 50 }), text: "x" }),
+      ],
+    }),
+  );
+  assert.equal(s.longestQuietRun.turns, 2);
+  assert.equal(s.longestQuietRun.model, "claude-sonnet-5");
+});
+
+test("days since a server was last called", () => {
+  const day = (n) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+  const last = mcpLastUsed([
+    { day: day(12), mcpCalls: { notion: 3 } },
+    { day: day(2), mcpCalls: { github: 9, notion: 1 } },
+    { day: day(30), mcpCalls: { github: 1 } },
+  ]);
+  assert.deepEqual(last, { notion: day(2), github: day(2) }, "the most recent day wins");
+
+  const since = daysSince({ notion: day(12), github: day(2) });
+  assert.equal(since.notion, 12);
+  assert.equal(since.github, 2);
+  assert.deepEqual(daysSince({ bad: "not-a-day" }), {}, "an unparseable day is left out, not guessed");
 });
