@@ -118,6 +118,69 @@ Changes apply on the next run. To inspect the full file:
 marmot config --print
 ```
 
+<details>
+<summary><strong>Settings worth knowing</strong></summary>
+
+```jsonc
+{
+  // Rules allowed to interrupt at the end of a turn.
+  // Everything else waits for the daily digest.
+  "live": [
+    "session-cost",
+    "daily-cost",
+    "daily-baseline",
+    "session-turns",
+    "limit-reached"
+  ],
+
+  "digest": { "cadence": "daily" },
+
+  "session": {
+    "turnCap": 20,
+    "turnCapRequiresNoCompaction": true,
+    "costCap": 25,
+    "costFloor": 1
+  },
+
+  "daily": {
+    "costCap": 50,
+    "baselineSigma": 2.5,
+    "baselineDays": 14
+  },
+
+  "limits": {
+    "enabled": true,
+    "steps": [50, 75, 90],
+    "autoRefresh": true,
+    "paceRatio": 1.5,
+    "paceMinElapsed": 15,
+    "paceMinUsed": 20
+  },
+
+  "notify": {
+    "desktop": true,
+    "bell": true,
+    "app": null,
+    "sound": "Ping",
+    "persist": true
+  },
+
+  "cache": { "minHitRate": 0.7, "minTurns": 20 },
+  "toolErrors": { "maxRate": 0.1, "minCalls": 20 },
+  "browse": { "keep": 5 },
+  "mcp": {
+    "enabled": true,
+    "autoAudit": true,
+    "auditMaxAgeDays": 7
+  },
+
+  // USD per million tokens for negotiated pricing.
+  "rateOverrides": {}
+}
+```
+
+</details>
+
 Optional statusline:
 
 ```bash
