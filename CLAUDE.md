@@ -243,12 +243,13 @@ Both of these fail **silently or obscurely** — they cost an afternoon each.
    for a click. That is `dialogCommand()` in `notify.mjs`, and it is the only
    thing on macOS that solves either problem.
 
-   It is the **default** for nudges (`notify.style`, `alert` / `auto` /
-   `banner`). The daily digest overrides it back to a banner by passing
-   `style: "banner"` to `alert()` — a summary is not a warning, and a box in the
-   way of every session start is how the whole feature gets muted. That
-   override only works in that direction: a caller cannot force a dialog on a
-   user who set `notify.style` to `banner`.
+   It is the **default**, for nudges and for the daily digest alike.
+   `notify.style` is `{ nudge, digest }`, each `alert` / `auto` / `banner`, so
+   the two are set separately; a plain string still sets both, which is what the
+   setting used to be. Callers say which they are with `kind` rather than
+   hard-coding a shape. A caller may force a banner (`test-notification
+   --banner`) but never a dialog — that direction is the user's setting to
+   make.
 
    Two traps when touching this. `notifyStyle()` treats an unreadable value as
    the default rather than falling through to `auto`, because one typo in a

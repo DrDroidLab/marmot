@@ -498,16 +498,50 @@ test("an ordinary nudge is a dialog too, now that it is the default", () => {
 });
 
 test("a caller may insist on a banner, but never the other way", () => {
-  // The digest uses this: it is a summary you read when you sit down, and a box
-  // in the way of every session start is how the whole thing gets muted.
-  const digest = alert(DEFAULTS, { title: "t", body: "b", style: "banner", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
-  assert.equal(digest.style, "banner");
-  assert.match(digest.desktop.args[digest.desktop.args.length - 1], /BalloonTip/);
+  // `marmot test-notification --banner` uses this, to show you the shape you
+  // are not currently getting.
+  const shown = alert(DEFAULTS, { title: "t", body: "b", style: "banner", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(shown.style, "banner");
+  assert.match(shown.desktop.args[shown.desktop.args.length - 1], /BalloonTip/);
 
   // Asking for a dialog cannot override a user who has switched them off.
   const cfg = { ...DEFAULTS, notify: { ...DEFAULTS.notify, style: "banner" } };
   const forced = alert(cfg, { title: "t", body: "b", style: "alert", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
   assert.equal(forced.style, "banner", "notify.style is the user's to set");
+});
+
+test("nudges and the digest are set separately, and both are dialogs to begin with", () => {
+  assert.equal(notifyStyle(DEFAULTS, false, "nudge"), "alert");
+  assert.equal(notifyStyle(DEFAULTS, false, "digest"), "alert");
+
+  const quietDigest = { notify: { style: { nudge: "alert", digest: "banner" } } };
+  assert.equal(notifyStyle(quietDigest, false, "nudge"), "alert", "a quiet digest does not quieten the nudges");
+  assert.equal(notifyStyle(quietDigest, false, "digest"), "banner");
+
+  // Half a setting is still a setting: deepMerge keeps the other kind's
+  // default, so writing only `digest` cannot silently change `nudge`.
+  const half = { notify: { style: { digest: "banner" } } };
+  assert.equal(notifyStyle(half, false, "nudge"), "alert");
+
+  // `auto` on the digest has nothing to escalate for — a digest is never
+  // urgent — so it means banner.
+  assert.equal(notifyStyle({ notify: { style: { digest: "auto" } } }, false, "digest"), "banner");
+});
+
+test("a plain string still sets both kinds", () => {
+  // It is what the setting used to be, and still the reasonable thing to type.
+  for (const kind of ["nudge", "digest"]) {
+    assert.equal(notifyStyle({ notify: { style: "banner" } }, true, kind), "banner");
+    assert.equal(notifyStyle({ notify: { style: "alert" } }, false, kind), "alert");
+  }
+});
+
+test("the digest asks for its own kind rather than hard-coding a shape", () => {
+  const cfg = { ...DEFAULTS, notify: { ...DEFAULTS.notify, style: { nudge: "alert", digest: "banner" } } };
+  const digest = alert(cfg, { title: "Marmot · daily digest", body: "b", kind: "digest", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(digest.style, "banner");
+  const nudge = alert(cfg, { title: "Marmot · 90%", body: "b", platform: "win32", env: quiet, ttyPath: null, stream: fakeStream() });
+  assert.equal(nudge.style, "alert", "the same config, the other kind");
 });
 
 test("notify.style banner keeps the dialog away even from the last mark", () => {

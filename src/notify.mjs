@@ -66,13 +66,17 @@ const cleanBlock = (s, n = 600) =>
  * A caller may override both — the daily digest does, because it is a summary
  * rather than a warning.
  */
-export function notifyStyle(cfg, urgent = false) {
-  const s = cfg?.notify?.style;
+export function notifyStyle(cfg, urgent = false, kind = "nudge") {
+  const raw = cfg?.notify?.style;
+  // A plain string sets both kinds at once, which is what the setting used to
+  // be and is still the reasonable thing to type.
+  const s = typeof raw === "string" ? raw : raw && typeof raw === "object" ? raw[kind] : undefined;
   if (s === "banner") return "banner";
   if (s === "auto") return urgent ? "alert" : "banner";
   // Anything else, including a typo and an absent setting, is the default.
   // Falling through to `auto` instead would let one bad character in a config
-  // file quietly downgrade every nudge below the level that was asked for.
+  // file quietly downgrade every notification below the level that was asked
+  // for.
   return "alert";
 }
 
@@ -331,11 +335,12 @@ export function deliverability({ platform = process.platform, env = process.env,
  * which is what the tests assert on — firing a real popup to check is not a
  * test anyone wants to run.
  */
-export function alert(cfg, { title = "Marmot", body = "", urgent = false, style: forced = null, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
+export function alert(cfg, { title = "Marmot", body = "", urgent = false, kind = "nudge", style: forced = null, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
   const n = cfg?.notify ?? {};
-  // A caller may insist on a banner for something that is not a warning. It
-  // cannot insist the other way — that is the user's setting to make.
-  const style = forced === "banner" ? "banner" : notifyStyle(cfg, urgent);
+  // A caller may insist on a banner — `marmot test-notification --banner` does,
+  // to show you the other shape. It cannot insist the other way: that is the
+  // user's setting to make.
+  const style = forced === "banner" ? "banner" : notifyStyle(cfg, urgent, kind);
   const did = { bell: false, desktop: null, style };
 
   if (n.bell && !silenced(env)) {

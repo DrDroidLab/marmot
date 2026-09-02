@@ -154,24 +154,32 @@ export const DEFAULTS = {
     // for the posting app, and `marmot doctor` says where. A dialog, below,
     // sidesteps all of that.
     persist: true,
-    // Banner or dialog. A nudge is a warning, and a warning that fades while
-    // you are looking at another window did not happen — so a dialog is the
-    // default: it carries the marmot, has room for what to do about it as well
-    // as what it cost, and waits until you dismiss it.
+    // How each kind of message arrives. Both are dialogs by default.
     //
-    //   alert   a dialog, always. The default.
-    //   auto    a dialog only for the nudge that says you are about to run out
-    //           — the last mark before a limit, and a window burning faster
-    //           than it refills. Everything else is a banner.
-    //   banner  never a dialog, whatever it says.
+    //   alert   A dialog. It carries the marmot, has room for what to do about
+    //           it as well as what it cost, and stays on screen until you
+    //           dismiss it. The default for both.
+    //   banner  The ordinary desktop notification. Lighter, and it does not
+    //           interrupt — but it has **no marmot on it** and it **dismisses
+    //           itself**: on macOS an icon is whichever app posted the
+    //           notification, and how long it lasts is that app's Alert style,
+    //           neither of which Marmot can set. Choose it knowing a banner you
+    //           were not looking at is a banner you missed.
+    //   auto    A dialog only when you are about to run out — the last mark
+    //           before a limit, and a window burning faster than it refills.
+    //           A banner otherwise. Nudges only; on `digest` it means banner.
     //
-    // The daily digest is a banner under all three: it is a summary you read
-    // when you sit down, not a warning, and a box in the way of every session
-    // start is how the whole thing gets muted.
+    // `"style": "banner"` as a plain string still works and sets both.
     //
-    // On Linux a dialog is neither needed nor used: a critical notification
-    // there already shows the icon and already never expires.
-    style: "alert",
+    // On Linux the distinction barely applies and nothing needs setting: a
+    // critical notification there already shows the marmot and already never
+    // expires.
+    style: {
+      // A rule firing: you are at 90% of the week, this session has cost $418.
+      nudge: "alert",
+      // The once-a-day summary of yesterday, at the start of a session.
+      digest: "alert",
+    },
   },
 
   // Each run writes a new page, so the browser can never show you a cached
