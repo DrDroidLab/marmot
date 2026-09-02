@@ -124,6 +124,21 @@ carries `baselineTokens`, `dirTouches`, `promptTimes`, `modelTokens`,
 page run the same `totals()` and the same rules as the terminal report, so the
 two surfaces cannot quote different numbers. Keep it that way when adding a field.
 
+## Rules and diagnoses
+
+Two kinds of thing, and the distinction is the whole design:
+
+- A **rule** decides *whether to interrupt you* — a budget crossing a mark, a
+  day unlike your own normal. There are six, and they are in `rules.mjs`.
+- A **diagnosis** explains *why*, in one quantified sentence, and never fires on
+  its own. They are in `diagnose.mjs`, scored by `share × confidence ×
+  leverage`, and the highest-scoring one becomes the middle sentence of whatever
+  rule fired.
+
+Six rules were deleted when the diagnoses arrived, because a nudge and a
+diagnosis saying the same thing is how both get muted. If you are about to add a
+rule that explains a cost rather than announcing a threshold, it is a diagnosis.
+
 ## Adding a rule
 
 Rules live in `sessionRules` (judge one session) or `windowRules` (need the whole

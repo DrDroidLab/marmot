@@ -1,6 +1,7 @@
 import { byDay, byProject } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins, dim, bold, warn, info } from "./format.mjs";
 import { skillCosts } from "./skills.mjs";
+import { allDiagnoses } from "./diagnose.mjs";
 
 const SHADOW_API =
   "These are published API rates, which is what pay-as-you-go usage actually costs.";
@@ -78,7 +79,7 @@ export function renderSessionList(sessions, { heading = false } = {}) {
   return out.join("\n");
 }
 
-export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null, attribution = null, serverConfigs = {} }) {
+export function renderReport(sessions, cfg, { days, nudges, demo = false, skillSizes = {}, mcpSizes = null, configuredServers = [], plan = null, attribution = null, serverConfigs = {}, diagnose = null }) {
   const source = demo
     ? "synthetic demo data — nothing here came from your machine"
     : "everything below was read from ~/.claude/projects on this machine";
@@ -243,6 +244,17 @@ export function renderReport(sessions, cfg, { days, nudges, demo = false, skillS
     for (const [kind, items] of Object.entries(attr.top ?? {})) {
       out.push(dim(`  ${"".padStart(6)}  top ${kind.replace(/-/g, " ")}: ${items.map((i) => `${i.name} ${i.percent}%`).join(", ")}`));
     }
+  }
+
+  // The causes, ranked, with their scores. A nudge carries whichever one wins;
+  // this is the working behind it, so the choice can be argued with.
+  const causes = diagnose ? allDiagnoses(diagnose) : [];
+  if (causes.length) {
+    out.push("");
+    out.push(bold("  Why it is going"));
+    out.push(dim("  Ranked by how much each explains, how sure we are, and how cheaply it can be fixed."));
+    const w = Math.max(...causes.map((c) => c.id.length));
+    for (const c of causes) out.push(`  ${c.id.padEnd(w)}  ${String(Math.round(c.score * 100)).padStart(3)}  ${c.line}`);
   }
 
   out.push("");

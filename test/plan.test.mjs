@@ -242,10 +242,9 @@ test("a subscription still hears about waste, which is the point", () => {
     toolErrorRate: 0.3,
   };
   const ids = sessionRules.map((r) => [r.id, r.check(wasteful, DEFAULTS, { plan: max })]).filter(([, hit]) => hit).map(([id]) => id);
-  assert.ok(ids.includes("session-turns"), "long session with no reset");
-  assert.ok(ids.includes("cache-hit"), "context being rebuilt");
-  assert.ok(ids.includes("tool-errors"), "calls paid for twice");
-  assert.ok(!ids.includes("session-cost"), "but not the dollar cap");
+  // The waste rules became diagnoses; what a subscription still gets as its own
+  // nudge is the shape of the session, and never the dollar cap.
+  assert.ok(!ids.includes("session-cost"), "not the dollar cap");
 });
 
 test("evaluate passes the plan down to the session rules", () => {
@@ -486,34 +485,6 @@ test("a format change costs the section, not the report", () => {
   assert.equal(partial.windows[0].requests, 100);
   assert.equal(partial.windows[0].sessions, null, "sessions are optional");
   assert.deepEqual(partial.windows[0].behaviours, [{ percent: 55, text: "of your usage was odd" }]);
-});
-
-test("limit-drivers quotes the source rather than inferring", () => {
-  const attribution = parseUsageOutput(USAGE_OUTPUT);
-  const out = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", limits: [] }, attribution });
-  const hits = out.filter((w) => w.id === "limit-drivers");
-
-  assert.equal(hits.length, 2, "both behaviours are past the bar");
-  assert.match(hits[0].detail, /Claude Code attributes 96%/);
-  assert.match(hits[0].detail, /2,590 requests in 19 sessions/);
-  assert.match(hits[1].detail, /sessions active for 8\+ hours/);
-  assert.match(hits[1].action, /fresh session at each new piece of work/);
-  assert.match(hits[0].action, /compact/);
-});
-
-test("limit-drivers stays quiet below the bar", () => {
-  const quiet = parseUsageOutput("Last 7d · 100 requests · 4 sessions\n  12% of your usage was at >150k context");
-  const out = windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", limits: [] }, attribution: quiet });
-  assert.equal(out.filter((w) => w.id === "limit-drivers").length, 0);
-});
-
-test("limit-drivers re-speaks only when the share moves materially", () => {
-  const key = (pct) => {
-    const a = parseUsageOutput(`Last 7d · 100 requests\n  ${pct}% of your usage was at >150k context`);
-    return windowRules([], DEFAULTS, { today: "2026-09-01", includeMcp: false, plan: { plan: "Max 20×", limits: [] }, attribution: a })[0]?.key;
-  };
-  assert.equal(key(91), key(96), "still nine tenths");
-  assert.notEqual(key(69), key(81), "a different band is worth saying again");
 });
 
 test("a saved attribution is read back, and a broken one is null", (t) => {

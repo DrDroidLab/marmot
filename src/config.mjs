@@ -18,7 +18,7 @@ export const DEFAULTS = {
   // Rules that may interrupt you mid-session, at the end of an assistant turn.
   // Everything else is saved for the digest — a nudge you cannot act on right
   // now is an interruption, not a nudge.
-  live: ["session-cost", "daily-cost", "daily-baseline", "session-turns", "limit-reached"],
+  live: ["limit-reached", "session-cost", "daily-cost", "daily-baseline"],
 
   // What a mid-session interruption is allowed to cost you. Four budgets with
   // four marks each is sixteen possible interruptions, which would undo the
@@ -63,6 +63,11 @@ export const DEFAULTS = {
   // dollars are already paid, and what you are actually spending is allowance.
   limits: {
     enabled: true,
+    // How much of the burn an explanation must account for before it is worth
+    // putting in a notification. Below this the nudge goes out with the
+    // threshold alone rather than a weak guess.
+    causeFloor: 0.08,
+
     // Marks on the way to a limit, as a percentage of it. Crossing each one
     // speaks once, so you hear "half gone" long before "nearly out" — a single
     // cap can only ever tell you the second.

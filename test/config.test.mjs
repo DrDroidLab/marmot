@@ -97,7 +97,7 @@ test("every rule in `live` is a rule that exists", async () => {
   const { sessionRules } = await import("../src/rules.mjs");
   // Window rules are not in `sessionRules`, so they are listed here. Adding a
   // window rule without adding it here is exactly the drift this catches.
-  const known = new Set([...sessionRules.map((r) => r.id), "daily-cost", "daily-baseline", "mcp-idle", "premium-window", "limit-reached"]);
+  const known = new Set([...sessionRules.map((r) => r.id), "daily-cost", "daily-baseline", "limit-reached", "limit-pace"]);
   for (const id of DEFAULTS.live) assert.ok(known.has(id), `${id} is not a known rule`);
 });
 

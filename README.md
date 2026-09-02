@@ -124,6 +124,22 @@ Run `marmot --help` for the complete reference.
 
 Every check is deterministic. No model decides whether to nudge you.
 
+Most of those are **causes rather than alarms**. What interrupts you is a
+threshold—half, three quarters, then nine tenths of a plan window—and the nudge
+carries whichever cause best explains getting there:
+
+```text
+▲ 75% of your weekly limit
+  76% of your weekly limit is gone on Max 20×. It resets in 2.1d.
+  Each turn re-sends 603K tokens of history, over 57 prompts and 3.8d.
+  Run /compact, or start a new session for the next distinct piece of work.
+```
+
+Causes are ranked by how much each explains, how confident Marmot is, and how
+cheaply it can be fixed. `marmot` prints that ranking under **Why it is going**,
+scores included. When nothing scores highly enough, the threshold still fires
+without an invented reason.
+
 ## When Marmot speaks
 
 Rules in the `live` list can interrupt at the end of a turn—the moment you can
@@ -259,24 +275,25 @@ it resets:
 
 | Rule | Fires when | Default |
 |---|---|---|
-| `session-turns` | Prompts typed in one session, with no compaction | > 20 |
 | `session-cost` | One session's modelled cost | > $25 |
 | `daily-cost` | Today's total | > $50 |
 | `daily-baseline` | Today against your trailing average | > 2.5σ over 14 days |
-| `premium-light-work` | Premium-model share on a small session | > 70% and < 10 tool calls, or docs/tests only |
-| `cache-hit` | Input tokens served from cache | < 70% over ≥ 20 turns |
-| `tool-errors` | Failed tool calls | > 10% over ≥ 20 calls |
-| `mcp-idle` | Configured servers never invoked | any |
 | `session-topics` | A long session resumed in a different area | > 1 day gap, ≥ 2 areas |
-| `premium-window` | Premium models repeatedly used on small sessions | ≥ 5 sessions |
+| `limit-reached` | A plan window crosses a configured mark | 50%, 75%, 90% |
+| `limit-pace` | Allowance is disappearing faster than the window | > 1.5× pace, ≥ 15% elapsed, ≥ 20% used |
+| `limit-drivers` | Claude Code attributes a large share to one behavior | > 60% |
+
+Idle MCP servers, subagent burn, carried history, quiet premium-model work and
+failing tools are now ranked as **causes** behind these thresholds. They explain
+a nudge instead of creating a second, duplicated alarm.
 
 ### The keys people actually change
 
 ```jsonc
 {
   // Rules allowed to interrupt at the end of a turn.
-  "live": ["session-cost", "daily-cost", "daily-baseline",
-           "session-turns", "limit-reached"],
+  "live": ["limit-reached", "session-cost", "daily-cost",
+           "daily-baseline"],
 
   "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
@@ -285,7 +302,8 @@ it resets:
 
   "digest": { "cadence": "daily" },
 
-  "limits": { "enabled": true, "steps": [50, 75, 90],
+  "limits": { "enabled": true, "causeFloor": 0.08,
+              "steps": [50, 75, 90],
               "autoRefresh": true, "paceRatio": 1.5,
               "paceMinElapsed": 15, "paceMinUsed": 20,
               "driverMinPercent": 60 },
