@@ -408,6 +408,30 @@ cases are pinned by the test suite.
 - **Marmot is alpha.** Claude Code's session format is internal and can change.
   `marmot doctor` shows what remains readable.
 
+## Nudges wrong, or not arriving?
+
+The hooks run in a process Claude Code starts and reaps, so there is normally
+nothing to look at. Marmot keeps a log of what they did and why:
+
+```bash
+marmot logs                 # newest first, and whether the hooks are installed at all
+marmot logs --json          # raw JSONL, oldest first — attach this to a bug report
+```
+
+Each run records the plan it read, the caps it compared against, and every
+rule's outcome:
+
+```
+  2026-09-03 09:45:58  Stop         nothing to say
+    session  6d16e4fb · $33.75 · 30 turns · 30 prompts
+    plan     Max 20× · weekly_all 6%
+    rule     quiet  session-cost — the rule did not match
+```
+
+That is usually enough to tell a wrong threshold from a rule that never ran.
+It is capped, and local like everything else; `marmot config set
+log.hooks=false` turns it off.
+
 ## Notifications not appearing?
 
 ```bash

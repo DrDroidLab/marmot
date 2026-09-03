@@ -91,17 +91,14 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/detail.mjs` | Per-turn reader for the browser: the event timeline. |
 | `src/pricing.mjs` | Published rates, cache multipliers, fast mode. |
 | `src/rules.mjs` | The nudge rules. Pure functions, no I/O beyond MCP config. |
-| `src/notify.mjs` | Bell + desktop notification. Never throws; `MARMOT_NO_NOTIFY` mutes it. |
+| `src/notify.mjs` | Bell, banner and dialog. Never throws; `MARMOT_NO_NOTIFY` mutes it. |
 | `src/skills.mjs` | Skill sizes, read from SKILL.md on disk. |
 | `src/mcp.mjs` | Server discovery, and the audit client. The only code that starts a process. |
 | `src/open.mjs` | Which editor opens the config, per OS. `open -t`, not `open`. |
 | `src/plan.mjs` | Plan, real limit utilisation, and the `/usage` attribution block. |
-
-`docs/marmot.ico` is generated from `docs/marmot.svg` — render it to a 256px
-PNG and wrap it in an ICO container (a PNG-embedded ICO, fine on Vista+).
-Regenerate it if the SVG changes; Windows notifications cannot use the SVG.
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
+| `src/hooklog.mjs` | What the hooks did and why, plus where they are installed. |
 | `src/render.mjs` | Terminal output. |
 | `src/html.mjs` | The self-contained browser page (one template function). |
 | `src/demo.mjs` | Deterministic synthetic sessions for `--demo`. |
@@ -110,6 +107,21 @@ Regenerate it if the SVG changes; Windows notifications cannot use the SVG.
 | `scripts/hook.mjs` | SessionStart digest + Stop live nudges. |
 | `scripts/statusline.mjs` | The statusline. Incremental file reads. |
 | `test/` | `node:test` suite. `npm test`. |
+
+The marmot ships in three formats because three platforms want three things,
+all rendered from `docs/marmot.svg` and all needing regeneration if it changes:
+
+| File | Used by | Why not the SVG |
+|---|---|---|
+| `marmot.svg` | Linux `notify-send -i` | — |
+| `marmot.ico` | Windows `NotifyIcon` | Render to 256px PNG, wrap in an ICO container (PNG-embedded, fine on Vista+). |
+| `marmot.png` | the macOS dialog | `display dialog` takes a PNG, so no `.icns` — 14KB rather than 425KB. |
+
+**Every one of them must be in `package.json` `files`.** `iconPath()` resolves
+against the *installed* copy, so an asset left out of that list works perfectly
+in the repo and ships every global install a notification with no marmot on it
+— silently, and only on someone else's machine. `docs/marmot.png` was missing
+on the first pass; `test/notify.test.mjs` now fails if any format is unshipped.
 
 Two readers exist on purpose: `sessions.mjs` answers *what did this cost*,
 `detail.mjs` answers *what happened*. `isTypedPrompt()` is shared between them —
@@ -123,6 +135,43 @@ carries `baselineTokens`, `dirTouches`, `promptTimes`, `modelTokens`,
 `toolErrorRate` and `mcpCalls`/`skills` aliases. That is what lets the browser
 page run the same `totals()` and the same rules as the terminal report, so the
 two surfaces cannot quote different numbers. Keep it that way when adding a field.
+
+## The hook is the part nobody can watch
+
+`scripts/hook.mjs` runs in a process Claude Code starts and reaps. Its stdout
+is parsed rather than shown, and it is silent by design most of the time — so
+when a nudge is wrong there is nothing to look at, and every part can be
+correct in isolation while the whole is broken.
+
+That is not hypothetical. A **"$25.00 cap" nudge reached a Max subscriber**:
+`dollarsAreBilled()` was right and unit-tested, but the hook called
+`rule.check(current, cfg)` with no third argument, so `ctx.plan` was undefined
+and every session rule judged a subscriber as pay-as-you-go. Window rules had
+been passing `plan` all along, which is why `daily-cost` behaved and
+`session-cost` did not. **If you add an argument a rule reads from `ctx`, check
+both call sites in the hook** — and test the context the hook builds, not only
+the rule given a correct one.
+
+`src/hooklog.mjs` exists because of that bug. Every run appends one JSON line
+to `~/.claude/marmot-hook.log`: the plan it read, the caps it compared against,
+each rule's outcome and why, and what went out. On by default and capped —
+a log you have to switch on and reproduce into is off at the moment it would
+have told you something.
+
+```bash
+marmot logs                 # what the hooks did, newest first, and how they are wired
+marmot logs --json          # the raw JSONL, oldest first, for a bug report
+marmot logs --path          # just the file
+```
+
+`hookWiring()` is the other half: it scans **every** settings scope, because
+reading only `settings.json` reported "not installed" for a machine whose hooks
+live in `settings.local.json` and work perfectly. It also flags a hook pointing
+at a file that is gone, which is what a reinstall to a different prefix leaves
+behind — an entry that reads correctly and silently never runs.
+
+When adding an early `process.exit(0)` to the hook, set `trace.outcome` first.
+The runs worth explaining are exactly the ones where nothing appeared.
 
 ## Rules and diagnoses
 
@@ -156,6 +205,15 @@ to `DEFAULTS` in `config.mjs` and a row to the README table.
 Rules in `cfg.live` may interrupt mid-session; everything else waits for the daily
 digest. Cost rules re-fire at each doubling (`state.mjs`), all others once per
 session.
+
+A rule may also set **`urgent: true`**, which only matters under
+`notify.style: "auto"` — there it is what earns a dialog instead of a banner.
+Reserve it for a nudge with nothing after it: `limit-reached` sets it on the
+*last* configured mark only (`crossed === steps[steps.length - 1]`), and
+`limit-pace` always, because it says the window runs out before it resets. A
+rule that merely reports a large number is not urgent. Under the default style
+every nudge is a dialog anyway, so `urgent` is a hint about severity, not a
+delivery mechanism.
 
 ## Contributing
 
@@ -283,7 +341,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 332 tests, node:test, no dependencies
+npm test        # 356 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:
@@ -296,8 +354,9 @@ The suite encodes the drill that used to be manual, so most of it is covered:
 | `test/agreement.test.mjs` | **The two readers agree** — cost, turns, tokens, prompts. |
 | `test/rules.test.mjs` | Every rule's three guards; quiet on an ordinary session. |
 | `test/cli.test.mjs` | Every command runs; `--no-text` redacts; the page is self-contained. |
-| `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them. |
-| `test/notify.test.mjs` | Alert decisions, without firing a real popup or bell. |
+| `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them — including **the context the hook builds**, not just the rules given a correct one. |
+| `test/hooklog.test.mjs` | The trace log, and finding hooks in every settings scope. |
+| `test/notify.test.mjs` | Banner vs dialog, per kind; every icon is published; no real popup or bell. |
 | `test/mcp.test.mjs` | The audit protocol, against a real stdio server it starts itself. |
 
 `test/helpers.mjs` builds fixtures in the real transcript shape — note that
@@ -305,7 +364,23 @@ The suite encodes the drill that used to be manual, so most of it is covered:
 entries, because a one-entry-per-response fixture cannot catch the 1.9x
 over-count.
 
-Two things the suite does not cover, still worth doing by hand:
+Notifications are the part the suite can only half-check: it asserts on the
+command that *would* run, never by running it. Look at all three shapes by hand
+after touching `notify.mjs`, on a machine with Focus/Do Not Disturb **off**:
+
+```bash
+marmot test-notification            # a nudge — dialog, marmot, waits for a click
+marmot test-notification --digest   # the daily digest, which has its own setting
+marmot test-notification --banner   # the other shape, for comparison
+marmot doctor                       # which channel, and what it thinks is set
+```
+
+The dialog is spawned detached with `stdio: "ignore"`, so **an AppleScript error
+is completely invisible** — the CLI still reports "sent". If one does not
+appear, run the exact `args[1]` from `dialogCommand()` through `osascript`
+directly, where the error is printed.
+
+Two more things the suite does not cover, still worth doing by hand:
 
 ```bash
 # the hook fires end to end against the real binary

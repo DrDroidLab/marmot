@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpRoot, writeSession, prompt, toolUse, response, usage } from "./helpers.mjs";
+import { readLog } from "../src/hooklog.mjs";
 
 const HOOK = fileURLToPath(new URL("../scripts/hook.mjs", import.meta.url));
 
@@ -48,6 +49,86 @@ test("a Stop hook on a cheap session says nothing", (t) => {
   t.after(cleanup);
   const f = writeSession(root, { id: "cheap", entries: [prompt("hi"), response({ id: "m1", u: usage({ output: 100 }), text: "hello" })] });
   assert.equal(fire(root, { hook_event_name: "Stop", transcript_path: f.path }), null);
+});
+
+test("a subscription's dollar cap stays quiet, because the money is already spent", (t) => {
+  // This shipped broken. `dollarsAreBilled` was right and unit-tested, but the
+  // hook called `rule.check(current, cfg)` with no third argument, so `ctx.plan`
+  // was undefined and every session rule judged a Max user as pay-as-you-go.
+  // The result was a "$25.00 cap" nudge to someone whose money is long gone and
+  // whose only real ceiling is the weekly quota. Nothing tested the *context*
+  // the hook passes, only the rules given a correct one.
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  writeFileSync(`${root}.json`, JSON.stringify({
+    oauthAccount: { organizationRateLimitTier: "default_claude_max_20x", organizationType: "claude_max", billingType: "stripe_subscription" },
+    cachedUsageUtilization: {
+      fetchedAtMs: Date.now(),
+      utilization: { limits: [{ kind: "weekly_all", group: "weekly", percent: 6, severity: "normal", resets_at: new Date(Date.now() + 200_000_000).toISOString(), is_active: true }] },
+    },
+  }));
+  const f = expensiveSession(root, { id: "max-plan" });
+  const msg = message(fire(root, { hook_event_name: "Stop", transcript_path: f.path }));
+  assert.doesNotMatch(msg, /cost cap/, "a dollar cap means nothing on a plan with quota");
+
+  // And the same session on no identifiable plan still gets it, so this is the
+  // plan being read rather than the rule being switched off.
+  const { root: r2, cleanup: c2 } = tmpRoot();
+  t.after(c2);
+  const f2 = expensiveSession(r2, { id: "no-plan" });
+  assert.match(message(fire(r2, { hook_event_name: "Stop", transcript_path: f2.path })), /cost cap/);
+});
+
+test("every hook run writes down what it saw and what it decided", (t) => {
+  // The point of the log: the plan it read, the caps it compared against, and
+  // each rule's outcome, next to each other. The $25-cap-on-Max bug was
+  // invisible precisely because none of this was written anywhere.
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  writeFileSync(`${root}.json`, JSON.stringify({
+    oauthAccount: { organizationRateLimitTier: "default_claude_max_20x", organizationType: "claude_max", billingType: "stripe_subscription" },
+    cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization: { limits: [{ kind: "weekly_all", group: "weekly", percent: 6, severity: "normal", resets_at: new Date(Date.now() + 2e8).toISOString(), is_active: true }] } },
+  }));
+  const f = expensiveSession(root, { id: "logged" });
+  fire(root, { hook_event_name: "Stop", transcript_path: f.path });
+
+  const log = readLog(root);
+  assert.equal(log.entries.length, 1);
+  const e = log.entries[0];
+  assert.equal(e.event, "Stop");
+  assert.equal(e.session, "logged");
+  assert.equal(e.plan.name, "Max 20×", "the reading that decides whether dollars are billed");
+  assert.deepEqual(e.plan.limits, [["weekly_all", 6]]);
+  assert.equal(e.caps.session, 25, "and the cap it was compared against");
+  assert.ok(e.rules.some((r) => r.id === "session-cost" && r.fired === false), "with each rule's outcome beside it");
+  assert.ok(typeof e.ms === "number", "and how long it took");
+});
+
+test("a hook that bails early still says why", (t) => {
+  // These are the runs you most want explained: nothing appeared, and there is
+  // otherwise nothing at all to look at.
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  fire(root, { hook_event_name: "Stop" });
+  fire(root, { hook_event_name: "Stop", transcript_path: join(root, "nope.jsonl") });
+
+  const outcomes = readLog(root).entries.map((e) => e.outcome);
+  assert.equal(outcomes.length, 2);
+  assert.match(outcomes[1], /no transcript_path/);
+  assert.match(outcomes[0], /could not read the transcript/);
+});
+
+test("MARMOT_NO_LOG leaves nothing behind", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const f = expensiveSession(root, { id: "unlogged" });
+  execFileSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ hook_event_name: "Stop", transcript_path: f.path }),
+    encoding: "utf8",
+    env: { ...process.env, MARMOT_ROOT: root, NO_COLOR: "1", MARMOT_NO_NOTIFY: "1", MARMOT_NO_LOG: "1" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  assert.equal(readLog(root).exists, false);
 });
 
 test("a Stop hook on an expensive session emits a systemMessage", (t) => {

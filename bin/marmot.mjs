@@ -16,7 +16,7 @@ import { loadSessions, defaultRoot } from "../src/sessions.mjs";
 import { loadConfig, DEFAULTS, configPath } from "../src/config.mjs";
 import { evaluate } from "../src/rules.mjs";
 import { renderReport, renderNudges, renderSessionList, totals } from "../src/render.mjs";
-import { usd, num, pct, tokens, dim, bold, warn, good } from "../src/format.mjs";
+import { usd, num, pct, tokens, mins, dim, bold, warn, good } from "../src/format.mjs";
 import { writeFileSync, existsSync, readFileSync, statSync } from "node:fs";
 
 const argv = process.argv.slice(2);
@@ -53,6 +53,7 @@ if (has("help") || cmd === "help") {
                       what their definitions cost on every request
     remind            Show or set when a nudge fires: --at 50,75,90, --cap 100
     test-notification Send one, and say what it did and where to look
+    logs              What the hooks did and why, newest first. --tail, --json
     doctor            What is readable on this machine, and what is not
 
   Flags
@@ -625,6 +626,87 @@ ${d.persistHint ? `\n  ${bold("Fading too fast?")} ${d.persistHint}\n  Or have e
   process.exit(0);
 }
 
+if (cmd === "logs") {
+  const { readLog, logging, hookWiring, hooksMissing } = await import("../src/hooklog.mjs");
+  const limit = argv.includes("--all") ? 0 : posInt(flag("tail"), 20);
+  const log = readLog(ROOT, { limit });
+
+  if (argv.includes("--path")) {
+    process.stdout.write(`${log.path}\n`);
+    process.exit(0);
+  }
+  // Raw JSONL, oldest first, so it can be piped into jq or attached to a bug
+  // report without anyone having to parse the pretty output back out.
+  if (argv.includes("--json")) {
+    for (const e of [...log.entries].reverse()) process.stdout.write(`${JSON.stringify(e)}\n`);
+    process.exit(0);
+  }
+
+  if (!log.exists) {
+    process.stdout.write(`\n  No hook log at ${bold(log.path)} yet.\n`);
+    process.stdout.write(
+      logging(cfg)
+        ? `  It is written when a hook runs. If it stays empty the hooks are not firing —\n  ${dim("marmot doctor")} says whether they are installed.\n\n`
+        : `  Logging is off (${dim("log.hooks")} is false, or MARMOT_NO_LOG is set).\n\n`,
+    );
+    process.exit(0);
+  }
+
+  // What is installed, above what it did. "Nothing in the log" means something
+  // very different depending on whether a hook is wired up at all.
+  const wiring = hookWiring(ROOT);
+  process.stdout.write(`\n  ${bold("Hooks installed")}\n`);
+  if (!wiring.length) {
+    process.stdout.write(`    ${warn("none found")} — run ${dim("marmot init --hooks")}\n`);
+  } else {
+    for (const w of wiring) {
+      if (w.malformed) {
+        process.stdout.write(`    ${warn("unreadable")}  ${w.settings} — ${w.malformed}\n`);
+        continue;
+      }
+      const state = w.exists === false ? warn("MISSING FILE — this hook never runs") : good("ok");
+      process.stdout.write(`    ${bold(w.event.padEnd(13))} ${state}  ${dim(w.scope)}\n      ${dim(w.file ?? w.command)}\n`);
+    }
+    const missing = hooksMissing(wiring);
+    if (missing.length) process.stdout.write(`    ${warn(`${missing.join(" and ")} not installed`)} — run ${dim("marmot init --hooks")}\n`);
+  }
+
+  process.stdout.write(`\n  ${bold(`Hook log · ${log.total} run${log.total === 1 ? "" : "s"}`)}  ${dim(log.path)}\n`);
+  if (log.skipped) process.stdout.write(dim(`  ${log.skipped} unreadable line${log.skipped === 1 ? "" : "s"} skipped.\n`));
+  process.stdout.write("\n");
+
+  for (const e of log.entries) {
+    const when = (e.at ?? "").slice(0, 19).replace("T", " ");
+    const fired = (e.rules ?? []).filter((r) => r.fired).length;
+    const head = e.outcome === "nudged" ? good(e.outcome) : e.outcome === "started" ? warn("did not finish") : e.outcome;
+    process.stdout.write(`  ${dim(when)}  ${bold((e.event ?? "?").padEnd(12))} ${head}\n`);
+
+    if (e.session) {
+      const money = e.cost === undefined ? "" : ` · ${usd(e.cost)}`;
+      process.stdout.write(`    ${dim("session")}  ${e.session.slice(0, 8)}${money} · ${e.turns} turns · ${e.prompts} prompts${e.cwd ? ` · ${e.cwd}` : ""}\n`);
+    }
+    // The plan is printed on every line that has one because it is what decides
+    // whether a dollar cap means anything, and a wrong reading here is
+    // invisible everywhere else.
+    if (e.plan !== undefined) {
+      const p = e.plan;
+      const limits = p?.limits?.length ? p.limits.map(([k, v]) => `${k} ${v}%`).join(", ") : "no quota";
+      process.stdout.write(`    ${dim("plan")}     ${p?.name ? bold(p.name) : warn("could not identify")} · ${limits}${p?.stale && p.ageMins !== null ? dim(` · snapshot ${mins(p.ageMins)} old`) : ""}\n`);
+    }
+    for (const r of e.rules ?? []) {
+      process.stdout.write(`    ${dim("rule")}     ${r.fired ? good("fired") : dim("quiet")}  ${r.id}${r.why ? dim(` — ${r.why}`) : ""}\n`);
+    }
+    if (e.held?.length) process.stdout.write(`    ${dim("held")}     ${e.held.join(", ")}\n`);
+    if (e.notify) process.stdout.write(`    ${dim("notify")}   ${e.notify.style ?? "?"}${e.notify.via ? ` via ${e.notify.via}` : ""}${e.notify.bell ? ` · bell ${e.notify.bell}` : ""}\n`);
+    if (!e.session && !e.rules?.length && !fired) process.stdout.write("");
+    process.stdout.write("\n");
+  }
+
+  process.stdout.write(`  ${dim("marmot logs --json > marmot-hooks.jsonl")}   attach this to a bug report\n`);
+  process.stdout.write(`  ${dim("marmot logs --all")}                        every run kept\n\n`);
+  process.exit(0);
+}
+
 if (cmd === "browse") {
   process.exit((await runBrowse()) ? 0 : 1);
 }
@@ -771,27 +853,21 @@ if (cmd === "doctor") {
 
   // Whether the nudges are actually wired up. "Installed" and "working" are
   // different states, and the gap between them is silent.
+  // Every scope, not just settings.json: a machine whose hooks live in
+  // settings.local.json was being told they were not installed.
+  const { hookWiring, hooksMissing, readLog } = await import("../src/hooklog.mjs");
+  const wiring = hookWiring(ROOT);
   const hooks = (() => {
-    let settings = {};
-    try {
-      settings = JSON.parse(readFileSync(`${ROOT}/settings.json`, "utf8"));
-    } catch {
-      return "not installed — run `marmot init --hooks`";
-    }
-    const found = [];
-    for (const [event, groups] of Object.entries(settings.hooks ?? {})) {
-      for (const g of groups ?? []) {
-        for (const h of g.hooks ?? []) {
-          const cmd = String(h.command ?? "");
-          if (!cmd.includes("marmot")) continue;
-          const file = (cmd.match(/"([^"]+)"/) ?? [])[1];
-          found.push(`${event}${file && !existsSync(file) ? " (points at a missing file!)" : ""}`);
-        }
-      }
-    }
-    if (!found.length) return "not installed — run `marmot init --hooks`";
-    const missing = ["SessionStart", "Stop"].filter((e) => !found.some((f) => f.startsWith(e)));
-    return `${found.join(", ")}${missing.length ? ` — ${missing.join(" and ")} missing, run \`marmot init --hooks\`` : ""}`;
+    if (!wiring.length) return "not installed — run `marmot init --hooks`";
+    const parts = wiring.filter((w) => w.event).map((w) => `${w.event}${w.exists === false ? " (points at a missing file!)" : ""} [${w.scope}]`);
+    const missing = hooksMissing(wiring);
+    return `${parts.join(", ")}${missing.length ? ` — ${missing.join(" and ")} missing, run \`marmot init --hooks\`` : ""}`;
+  })();
+  const hookRuns = (() => {
+    const l = readLog(ROOT, { limit: 1 });
+    if (!l.exists) return "no runs recorded yet — `marmot logs` explains";
+    const last = l.entries[0];
+    return `${num(l.total)} recorded, last ${last?.at?.slice(0, 19).replace("T", " ") ?? "?"} — \`marmot logs\``;
   })();
 
   process.stdout.write(`
@@ -803,6 +879,7 @@ if (cmd === "doctor") {
   Unpriced models ${unpriced.size ? [...unpriced].join(", ") : "none"}
   Sessions with 0 typed prompts  ${noPrompts}${noPrompts ? "  (resumed or agent-driven; not a fault)" : ""}
   Nudge hooks     ${hooks}
+  Hook runs       ${hookRuns}
   Notifications   ${notify}${persistNote}${d.channel === "macos" ? `\n                  If none arrive: check Focus is off, then allow notifications for\n                  that app in System Settings. notify.app posts as a different one.` : ""}
 
   Not readable here: lines added/removed (needs the diff), agent-active vs your

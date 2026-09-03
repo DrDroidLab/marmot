@@ -182,6 +182,16 @@ export const DEFAULTS = {
     },
   },
 
+  // What the hooks did, and why, one JSON line per run — `marmot logs`.
+  //
+  // On by default, because the whole point is to be there before the thing you
+  // want to debug happens. It is the only window into a process Claude Code
+  // starts and reaps, whose stdout you never see, and which is silent by
+  // design. Capped, so it cannot grow without bound.
+  //
+  // MARMOT_NO_LOG=1 turns it off for one run.
+  log: { hooks: true, keep: 500 },
+
   // Each run writes a new page, so the browser can never show you a cached
   // older one. This is how many are kept before the oldest are removed.
   browse: { keep: 5 },
