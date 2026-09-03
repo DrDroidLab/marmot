@@ -27,6 +27,7 @@ import { readState, writeState, shouldFire, markFired, withinQuietPeriod, markNu
 import { usd } from "../src/format.mjs";
 import { alert, notifyStyle } from "../src/notify.mjs";
 import { readPlan, refreshUsage, worthRefreshing, readAttribution } from "../src/plan.mjs";
+import { logging, append as logAppend, planTrace } from "../src/hooklog.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
 
@@ -54,8 +55,23 @@ const cfg = loadConfig(root);
 const state = readState(root);
 const today = new Date().toISOString().slice(0, 10);
 
+// What this run saw and decided. Filled in as we go and written on the way
+// out, from a single `exit` handler rather than at each of the seven places
+// this process can leave — one of which is inside `emit()`, and all of which
+// are the interesting ones when nothing appeared.
+const startedAt = Date.now();
+const trace = { event, pid: process.pid, outcome: "started", rules: [] };
+process.on("exit", () => {
+  if (!logging(cfg)) return;
+  trace.ms = Date.now() - startedAt;
+  logAppend(root, trace, { cfg });
+});
+
 if (event === "SessionStart") {
-  if (cfg.digest?.cadence === "off" || state.digestShownOn === today) process.exit(0);
+  if (cfg.digest?.cadence === "off" || state.digestShownOn === today) {
+    trace.outcome = cfg.digest?.cadence === "off" ? "digest off in config" : "digest already shown today";
+    process.exit(0);
+  }
   const sessions = loadSessions({ root, days: 30, rateOverrides: cfg.rateOverrides });
   if (!sessions.length) process.exit(0);
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -84,23 +100,39 @@ if (event === "SessionStart") {
   const body = renderNudges(nudges, { compact: true });
   state.digestShownOn = today;
   writeState(state, root);
-  if (body.trim()) alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), kind: "digest" });
+  trace.outcome = body.trim() ? "digest shown" : "digest: nothing flagged";
+  // `evaluate` returns the two kinds separately; the digest reports both.
+  trace.rules = [
+    ...(nudges.sessionNudges ?? []).map((n) => ({ id: n.id, fired: true, sessions: n.hits?.length ?? 0 })),
+    ...(nudges.windowNudges ?? []).map((n) => ({ id: n.key ?? n.id, fired: true })),
+  ];
+  if (body.trim()) {
+    const did = alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), kind: "digest" });
+    trace.notify = { style: did.style, via: did.desktop?.via ?? did.desktop?.cmd ?? null, bell: did.bell };
+  }
   emit(event, body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`);
 }
 
 // --- Stop: live rules against the session in front of you --------------------
 
 const tp = input.transcript_path;
-if (!tp) process.exit(0);
+if (!tp) {
+  trace.outcome = "no transcript_path on the hook input";
+  process.exit(0);
+}
 
 let current;
 try {
   statSync(tp);
   current = readSession({ path: tp, id: basename(tp, ".jsonl"), project: basename(dirname(tp)) }, { rateOverrides: cfg.rateOverrides });
-} catch {
+} catch (e) {
+  trace.outcome = `could not read the transcript: ${e.message}`;
   process.exit(0);
 }
-if (!current) process.exit(0);
+if (!current) {
+  trace.outcome = "transcript read, but no session in it";
+  process.exit(0);
+}
 
 const live = new Set(cfg.live ?? []);
 const lines = [];
@@ -111,12 +143,30 @@ const lines = [];
 // where the quota is the only ceiling that means anything.
 const plan = readPlan(root);
 
+trace.session = current.id;
+trace.cwd = current.cwd ?? null;
+trace.cost = Number(current.cost?.toFixed?.(2) ?? current.cost);
+trace.turns = current.assistantTurns;
+trace.prompts = current.typedPrompts;
+// The plan is here because it is what decides whether a dollar cap means
+// anything, and reading it wrong is invisible from the outside.
+trace.plan = planTrace(plan);
+trace.live = [...live];
+trace.caps = { session: cfg.session?.costCap, daily: cfg.daily?.costCap };
+
 for (const rule of sessionRules) {
   if (!live.has(rule.id)) continue;
   const hit = rule.check(current, cfg, { plan });
-  if (!hit) continue;
-  if (!shouldFire(state, current.id, rule.id, current.cost)) continue;
+  if (!hit) {
+    trace.rules.push({ id: rule.id, fired: false, why: "the rule did not match" });
+    continue;
+  }
+  if (!shouldFire(state, current.id, rule.id, current.cost)) {
+    trace.rules.push({ id: rule.id, fired: false, why: "already said for this session, and not yet doubled" });
+    continue;
+  }
   markFired(state, current.id, rule.id, current.cost);
+  trace.rules.push({ id: rule.id, fired: true });
   lines.push({ label: rule.label, detail: hit.detail, action: hit.action, urgent: hit.urgent === true });
 }
 
@@ -139,14 +189,19 @@ if (live.has("daily-cost") || live.has("daily-baseline") || live.has("limit-reac
     if (!live.has(w.id)) continue;
     const todayCost = all.filter((s) => s.day === today).reduce((a, s) => a + s.cost, 0);
     const key = w.key ?? w.id;
-    if (!shouldFire(state, today, key, todayCost)) continue;
+    if (!shouldFire(state, today, key, todayCost)) {
+      trace.rules.push({ id: key, fired: false, why: "already said today, and not yet doubled" });
+      continue;
+    }
     markFired(state, today, key, todayCost);
+    trace.rules.push({ id: key, fired: true });
     lines.push({ label: w.label, detail: w.detail, action: w.action, urgent: w.urgent === true });
   }
 }
 
 if (!lines.length) {
   writeState(state, root);
+  trace.outcome = "nothing to say";
   process.exit(0);
 }
 
@@ -155,6 +210,9 @@ if (!lines.length) {
 // it just does not arrive as a third popup inside ten minutes.
 if (withinQuietPeriod(state, cfg.interrupt?.minGapMins ?? 20)) {
   writeState(state, root);
+  // Held back rather than dropped: it is still in the digest and in `marmot`.
+  trace.outcome = `held: within ${cfg.interrupt?.minGapMins ?? 20} min of the last nudge`;
+  trace.held = lines.map((l) => l.label);
   process.exit(0);
 }
 
@@ -162,7 +220,7 @@ const show = lines.slice(0, Math.max(1, cfg.interrupt?.maxPerNudge ?? 1));
 markNudged(state);
 writeState(state, root);
 
-alert(cfg, {
+const did = alert(cfg, {
   title: `Marmot · ${show[0].label}`,
   // A banner gets the one line it has room for. A dialog has room for the whole
   // nudge, so it carries what to do about it too — which is the half that
@@ -173,6 +231,9 @@ alert(cfg, {
       : show[0].detail) + (lines.length > 1 ? `\n\n${lines.length - 1} more in \`marmot\`.` : ""),
   urgent: show[0].urgent,
 });
+trace.outcome = "nudged";
+trace.nudge = show.map((l) => l.label);
+trace.notify = { style: did.style, via: did.desktop?.via ?? did.desktop?.cmd ?? null, bell: did.bell };
 
 emit(
   event,

@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { append, logPath } from "../src/hooklog.mjs";
 import { tmpRoot, writeSession, prompt, toolUse, response, usage } from "./helpers.mjs";
 
 const CLI = fileURLToPath(new URL("../bin/marmot.mjs", import.meta.url));
@@ -336,7 +337,7 @@ test("doctor says whether the nudge hooks are actually wired up", (t) => {
   assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /Nudge hooks\s+not installed/);
 
   run(["init", "--hooks", "--root", root]);
-  assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /Nudge hooks\s+SessionStart, Stop/);
+  assert.match(run(["doctor", "--days", "7", "--no-audit", "--root", root]).out, /Nudge hooks\s+SessionStart \[user\], Stop \[user\]/);
 });
 
 test("doctor names a half-installed or broken hook rather than passing it", (t) => {
@@ -589,4 +590,42 @@ test("browse --demo writes a page without touching the real root", (t) => {
   const html = readFileSync(out, "utf8");
   assert.match(html, /demo data/);
   assert.ok(html.length > 1000);
+});
+
+test("marmot logs explains an empty log rather than printing nothing", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const out = run(["logs", "--root", root]).out;
+  assert.match(out, /No hook log/);
+  assert.match(out, /hooks are not firing/, "the useful reading of an empty log");
+});
+
+test("marmot logs --json is pipeable, oldest first", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  append(root, { event: "Stop", outcome: "one" });
+  append(root, { event: "Stop", outcome: "two" });
+
+  const lines = run(["logs", "--root", root, "--json"]).out.trim().split("\n");
+  assert.deepEqual(lines.map((l) => JSON.parse(l).outcome), ["one", "two"], "chronological, for a bug report");
+});
+
+test("marmot logs shows the wiring above the runs", (t) => {
+  // An empty log means one thing if the hooks are installed and something very
+  // different if they are not.
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  append(root, { event: "Stop", outcome: "nothing to say" });
+  writeFileSync(join(root, "settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: 'node "/gone/marmot/hook.mjs"' }] }] } }));
+
+  const out = run(["logs", "--root", root]).out;
+  assert.match(out, /Hooks installed/);
+  assert.match(out, /MISSING FILE/, "a hook pointing at a deleted file never runs");
+  assert.match(out, /nothing to say/);
+});
+
+test("marmot logs --path prints somewhere you can pipe from", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  assert.equal(run(["logs", "--root", root, "--path"]).out.trim(), logPath(root));
 });

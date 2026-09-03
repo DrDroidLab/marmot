@@ -98,6 +98,7 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/plan.mjs` | Plan, real limit utilisation, and the `/usage` attribution block. |
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
+| `src/hooklog.mjs` | What the hooks did and why, plus where they are installed. |
 | `src/render.mjs` | Terminal output. |
 | `src/html.mjs` | The self-contained browser page (one template function). |
 | `src/demo.mjs` | Deterministic synthetic sessions for `--demo`. |
@@ -134,6 +135,43 @@ carries `baselineTokens`, `dirTouches`, `promptTimes`, `modelTokens`,
 `toolErrorRate` and `mcpCalls`/`skills` aliases. That is what lets the browser
 page run the same `totals()` and the same rules as the terminal report, so the
 two surfaces cannot quote different numbers. Keep it that way when adding a field.
+
+## The hook is the part nobody can watch
+
+`scripts/hook.mjs` runs in a process Claude Code starts and reaps. Its stdout
+is parsed rather than shown, and it is silent by design most of the time — so
+when a nudge is wrong there is nothing to look at, and every part can be
+correct in isolation while the whole is broken.
+
+That is not hypothetical. A **"$25.00 cap" nudge reached a Max subscriber**:
+`dollarsAreBilled()` was right and unit-tested, but the hook called
+`rule.check(current, cfg)` with no third argument, so `ctx.plan` was undefined
+and every session rule judged a subscriber as pay-as-you-go. Window rules had
+been passing `plan` all along, which is why `daily-cost` behaved and
+`session-cost` did not. **If you add an argument a rule reads from `ctx`, check
+both call sites in the hook** — and test the context the hook builds, not only
+the rule given a correct one.
+
+`src/hooklog.mjs` exists because of that bug. Every run appends one JSON line
+to `~/.claude/marmot-hook.log`: the plan it read, the caps it compared against,
+each rule's outcome and why, and what went out. On by default and capped —
+a log you have to switch on and reproduce into is off at the moment it would
+have told you something.
+
+```bash
+marmot logs                 # what the hooks did, newest first, and how they are wired
+marmot logs --json          # the raw JSONL, oldest first, for a bug report
+marmot logs --path          # just the file
+```
+
+`hookWiring()` is the other half: it scans **every** settings scope, because
+reading only `settings.json` reported "not installed" for a machine whose hooks
+live in `settings.local.json` and work perfectly. It also flags a hook pointing
+at a file that is gone, which is what a reinstall to a different prefix leaves
+behind — an entry that reads correctly and silently never runs.
+
+When adding an early `process.exit(0)` to the hook, set `trace.outcome` first.
+The runs worth explaining are exactly the ones where nothing appeared.
 
 ## Rules and diagnoses
 
@@ -303,7 +341,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 337 tests, node:test, no dependencies
+npm test        # 356 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:
@@ -316,7 +354,8 @@ The suite encodes the drill that used to be manual, so most of it is covered:
 | `test/agreement.test.mjs` | **The two readers agree** — cost, turns, tokens, prompts. |
 | `test/rules.test.mjs` | Every rule's three guards; quiet on an ordinary session. |
 | `test/cli.test.mjs` | Every command runs; `--no-text` redacts; the page is self-contained. |
-| `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them. |
+| `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them — including **the context the hook builds**, not just the rules given a correct one. |
+| `test/hooklog.test.mjs` | The trace log, and finding hooks in every settings scope. |
 | `test/notify.test.mjs` | Banner vs dialog, per kind; every icon is published; no real popup or bell. |
 | `test/mcp.test.mjs` | The audit protocol, against a real stdio server it starts itself. |
 
