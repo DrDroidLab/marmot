@@ -105,9 +105,15 @@ if (!current) process.exit(0);
 const live = new Set(cfg.live ?? []);
 const lines = [];
 
+// Read once, and give it to *both* kinds of rule. Session rules went without
+// it for a while, and a rule that cannot see the plan cannot know the money is
+// already spent — so `session-cost` announced a $25 cap to someone on Max,
+// where the quota is the only ceiling that means anything.
+const plan = readPlan(root);
+
 for (const rule of sessionRules) {
   if (!live.has(rule.id)) continue;
-  const hit = rule.check(current, cfg);
+  const hit = rule.check(current, cfg, { plan });
   if (!hit) continue;
   if (!shouldFire(state, current.id, rule.id, current.cost)) continue;
   markFired(state, current.id, rule.id, current.cost);
@@ -129,7 +135,7 @@ if (live.has("daily-cost") || live.has("daily-baseline") || live.has("limit-reac
   const all = [...others, { id: current.id, day: today, cost: current.cost, typedPrompts: current.typedPrompts, assistantTurns: current.assistantTurns }];
   // The plan's own limits belong in the live path above all: "you are at 90% of
   // this week" is only actionable before the week is out.
-  for (const w of windowRules(all, cfg, { root, today, includeMcp: false, plan: readPlan(root) })) {
+  for (const w of windowRules(all, cfg, { root, today, includeMcp: false, plan })) {
     if (!live.has(w.id)) continue;
     const todayCost = all.filter((s) => s.day === today).reduce((a, s) => a + s.cost, 0);
     const key = w.key ?? w.id;

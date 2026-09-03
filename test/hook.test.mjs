@@ -50,6 +50,34 @@ test("a Stop hook on a cheap session says nothing", (t) => {
   assert.equal(fire(root, { hook_event_name: "Stop", transcript_path: f.path }), null);
 });
 
+test("a subscription's dollar cap stays quiet, because the money is already spent", (t) => {
+  // This shipped broken. `dollarsAreBilled` was right and unit-tested, but the
+  // hook called `rule.check(current, cfg)` with no third argument, so `ctx.plan`
+  // was undefined and every session rule judged a Max user as pay-as-you-go.
+  // The result was a "$25.00 cap" nudge to someone whose money is long gone and
+  // whose only real ceiling is the weekly quota. Nothing tested the *context*
+  // the hook passes, only the rules given a correct one.
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  writeFileSync(`${root}.json`, JSON.stringify({
+    oauthAccount: { organizationRateLimitTier: "default_claude_max_20x", organizationType: "claude_max", billingType: "stripe_subscription" },
+    cachedUsageUtilization: {
+      fetchedAtMs: Date.now(),
+      utilization: { limits: [{ kind: "weekly_all", group: "weekly", percent: 6, severity: "normal", resets_at: new Date(Date.now() + 200_000_000).toISOString(), is_active: true }] },
+    },
+  }));
+  const f = expensiveSession(root, { id: "max-plan" });
+  const msg = message(fire(root, { hook_event_name: "Stop", transcript_path: f.path }));
+  assert.doesNotMatch(msg, /cost cap/, "a dollar cap means nothing on a plan with quota");
+
+  // And the same session on no identifiable plan still gets it, so this is the
+  // plan being read rather than the rule being switched off.
+  const { root: r2, cleanup: c2 } = tmpRoot();
+  t.after(c2);
+  const f2 = expensiveSession(r2, { id: "no-plan" });
+  assert.match(message(fire(r2, { hook_event_name: "Stop", transcript_path: f2.path })), /cost cap/);
+});
+
 test("a Stop hook on an expensive session emits a systemMessage", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
