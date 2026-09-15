@@ -21,7 +21,7 @@ users most often want:
 - `session.costCap` / `daily.costCap` — dollar caps, which only fire on
   pay-as-you-go. On a subscription the money is already spent, so they are
   skipped rather than firing every day about a bill nobody sends.
-- `session.turnCap` — prompts in one session before it is worth a word.
+- `session.turnMarks` — prompts typed in one session at which to say so, on any plan (default `[10, 15, 20]`).
 - `live` — which rules may interrupt mid-session. Everything not listed here
   waits for the daily digest.
 - `rateOverrides` — set these if you are on negotiated rates and want the

@@ -18,7 +18,7 @@ export const DEFAULTS = {
   // Rules that may interrupt you mid-session, at the end of an assistant turn.
   // Everything else is saved for the digest — a nudge you cannot act on right
   // now is an interruption, not a nudge.
-  live: ["limit-reached", "session-cost", "daily-cost", "daily-baseline"],
+  live: ["limit-reached", "session-turns", "session-cost", "daily-cost", "daily-baseline"],
 
   // What a mid-session interruption is allowed to cost you. Four budgets with
   // four marks each is sixteen possible interruptions, which would undo the
@@ -33,11 +33,13 @@ export const DEFAULTS = {
   digest: { cadence: "daily" },
 
   session: {
-    // Typed prompts, not assistant turns and not tool results.
-    turnCap: 20,
-    // Only fires when the session never compacted: length alone is not a
-    // problem, length without a context reset is.
-    turnCapRequiresNoCompaction: true,
+    // Prompts you typed in one session — not model turns, not tool results — at
+    // which to say so. Every plan, compacted or not: compacting trims what a
+    // session carries, it does not make it a new one. Each mark speaks once.
+    // `marmot remind --turns 10,15,20`; an empty list silences it.
+    turnMarks: [10, 15, 20],
+    // Enterprise and API only. On Pro, Max and Team a dollar cap never speaks:
+    // Claude's own limits are the ceiling there (`limits`, below).
     costCap: 25,
     // Below this a session is too small to be worth a word about.
     costFloor: 1,
@@ -85,6 +87,11 @@ export const DEFAULTS = {
       "Enterprise": [50, 75, 90],
       "API": [],
     },
+    // Per window, and ahead of the per-plan marks: "session" (the 5-hour
+    // window), "weekly_all", or "weekly_scoped" (the weekly limit on one
+    // model). Empty, so every window speaks at the plan's marks until you say
+    // otherwise — `marmot remind --window session --at 90`.
+    byWindow: {},
     // A cached percentage older than this is reported with its age attached
     // rather than as current.
     staleAfterMins: 60,
@@ -108,6 +115,8 @@ export const DEFAULTS = {
     autoRefresh: true,
   },
 
+  // Enterprise and API only, like `session.costCap` — and the baseline too,
+  // because it is measured in the same dollars.
   daily: {
     costCap: 50,
     baselineSigma: 2.5,
@@ -189,8 +198,12 @@ export const DEFAULTS = {
   // starts and reaps, whose stdout you never see, and which is silent by
   // design. Capped, so it cannot grow without bound.
   //
-  // MARMOT_NO_LOG=1 turns it off for one run.
-  log: { hooks: true, keep: 500 },
+  // `notifications` is the other half: every notification that was actually
+  // shown, with its words, the rules behind it and the channel it went out on —
+  // `marmot notifications`. Rare, so it keeps far more of them.
+  //
+  // MARMOT_NO_LOG=1 turns both off for one run.
+  log: { hooks: true, keep: 500, notifications: true, keepNotifications: 1000 },
 
   // Each run writes a new page, so the browser can never show you a cached
   // older one. This is how many are kept before the oldest are removed.

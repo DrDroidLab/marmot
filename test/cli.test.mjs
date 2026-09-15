@@ -113,7 +113,7 @@ test("init writes the thresholds and refuses to clobber them", (t) => {
   const first = run(["init", "--root", root]);
   assert.match(first.out, /Wrote/);
   const cfg = JSON.parse(readFileSync(join(root, "marmot.json"), "utf8"));
-  assert.equal(cfg.session.turnCap, 20);
+  assert.deepEqual(cfg.session.turnMarks, [10, 15, 20]);
   assert.ok(!("_path" in cfg), "internal fields stay out of the written file");
 
   const second = run(["init", "--root", root]);
@@ -128,7 +128,7 @@ test("config creates the thresholds file with the defaults when there is none", 
   assert.match(out, /created/);
 
   const cfg = JSON.parse(readFileSync(join(root, "marmot.json"), "utf8"));
-  assert.equal(cfg.session.turnCap, 20);
+  assert.deepEqual(cfg.session.turnMarks, [10, 15, 20]);
   assert.ok(!("_path" in cfg) && !("_exists" in cfg), "internal fields stay out of the file");
 });
 
@@ -146,10 +146,10 @@ test("config --print shows the file, and the path either way", (t) => {
   const { root, cleanup } = populatedRoot();
   t.after(cleanup);
   const quiet = run(["config", "--no-open", "--root", root]).out;
-  assert.ok(!quiet.includes("turnCap"), "without --print it is just the path");
+  assert.ok(!quiet.includes("turnMarks"), "without --print it is just the path");
 
   const printed = run(["config", "--no-open", "--print", "--root", root]).out;
-  assert.match(printed, /"turnCap": 20/);
+  assert.match(printed, /"turnMarks": \[/);
   assert.match(printed, /marmot\.json/);
   // Whatever it printed after the path must be the file, parseable as JSON.
   const body = printed.slice(printed.indexOf("{"));
@@ -164,7 +164,7 @@ test("the file config writes is one loadConfig accepts", async (t) => {
   const cfg = loadConfig(root);
   assert.equal(cfg._exists, true);
   assert.equal(cfg.session.costCap, 25);
-  assert.deepEqual(cfg.live, ["limit-reached", "session-cost", "daily-cost", "daily-baseline"]);
+  assert.deepEqual(cfg.live, ["limit-reached", "session-turns", "session-cost", "daily-cost", "daily-baseline"]);
 });
 
 test("report --sessions folds the per-session list into the report", (t) => {
@@ -224,15 +224,15 @@ test("config set changes a threshold without opening an editor", (t) => {
   assert.equal(cfg.session.costCap, 50);
   assert.deepEqual(cfg.limits.steps, [25, 50, 75]);
   assert.equal(cfg.notify.bell, false);
-  assert.equal(cfg.session.turnCap, 20, "siblings are left alone");
+  assert.deepEqual(cfg.session.turnMarks, [10, 15, 20], "siblings are left alone");
 });
 
 test("config set creates the file from the defaults when there is none", (t) => {
   const { root, cleanup } = populatedRoot();
   t.after(cleanup);
-  run(["config", "set", "session.turnCap=40", "--root", root]);
+  run(["config", "set", "session.turnMarks=[8,12]", "--root", root]);
   const cfg = JSON.parse(readFileSync(join(root, "marmot.json"), "utf8"));
-  assert.equal(cfg.session.turnCap, 40);
+  assert.deepEqual(cfg.session.turnMarks, [8, 12]);
   assert.equal(cfg.daily.costCap, 50, "and the rest of the defaults come with it");
 });
 

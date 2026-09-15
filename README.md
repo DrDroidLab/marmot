@@ -33,6 +33,16 @@ Restart Claude Code, then verify it:
 marmot doctor
 ```
 
+Out of the box, you will hear about:
+
+- **Claude's own limits** — the 5-hour session window and the week — at 50%,
+  75% and 90%, on Pro, Max and Team.
+- **A long session**, at 10, 15 and 20 prompts you typed, on every plan.
+- **Dollar caps**, on Enterprise and pay-as-you-go API only, where the spend is
+  real.
+
+`marmot remind` shows where each stands and changes the marks.
+
 Want to look first? `marmot --demo` uses synthetic data and reads none of your
 sessions.
 
@@ -131,9 +141,10 @@ marmot nudges             # show only actionable findings
 marmot sessions           # list sessions one per line
 marmot mcp-audit          # measure MCP tool-definition weight
 marmot config             # open your thresholds
-marmot remind             # show or change when nudges fire
+marmot remind             # reminders: limits at 50/75/90%, long sessions at 10/15/20 prompts
 marmot doctor             # check readers, hooks and notifications
 marmot test-notification  # send a test nudge
+marmot notifications      # every notification you were shown, and what it said
 ```
 
 Useful options:
@@ -152,7 +163,7 @@ Run `marmot --help` for the complete reference.
 
 | Signal | What it means |
 |---|---|
-| Long session | Old turns keep travelling into new ones |
+| Long session | 10, 15 and 20 prompts in one session, on any plan: old turns keep travelling into new ones |
 | Stale session | Work resumes days later in a different area |
 | Idle MCP server | Tool definitions are loaded but never used |
 | Premium model on light work | A costly model handles a small task |
@@ -164,8 +175,9 @@ Run `marmot --help` for the complete reference.
 Every check is deterministic. No model decides whether to nudge you.
 
 Most of those are **causes rather than alarms**. What interrupts you is a
-threshold—half, three quarters, then nine tenths of a plan window—and the nudge
-carries whichever cause best explains getting there:
+threshold—half, three quarters, then nine tenths of a plan window, or a session
+reaching 10, 15 and 20 prompts—and a limit nudge carries whichever cause best
+explains getting there:
 
 ```text
 ▲ 75% of your weekly limit
@@ -185,10 +197,12 @@ Rules in the `live` list can interrupt at the end of a turn—the moment you can
 still change the session in front of you. Everything else waits for the daily
 digest.
 
-A rule speaks once per session. Cost warnings can return when the cost doubles,
-and plan warnings return at the configured marks. One live nudge also buys 20
-minutes of quiet before another can interrupt; held findings remain in the
-report and digest.
+A rule speaks once per session. Limit and long-session warnings return at each
+configured mark; cost warnings, on Enterprise and API, return when the cost
+doubles. When several apply at once, the one that can run out goes first: a
+limit, then money, then session length. One live nudge also buys 20 minutes of
+quiet before another can interrupt; held findings remain in the report and
+digest.
 
 ## Dollars or allowance
 
@@ -204,8 +218,8 @@ shows the plan limits Claude Code exposes locally:
 ```
 
 On pay-as-you-go usage, the same dollar figure is labelled **Spend** because it
-is the bill. Marmot uses percentage limits when the plan reports them and dollar
-caps when it does not.
+is the bill. On Pro, Max and Team, only Claude's own limits interrupt you; dollar
+caps speak on Enterprise and pay-as-you-go API, where the spend is real.
 
 ## Configuration
 
@@ -242,19 +256,49 @@ is a terminal to attach it to.
 ### Reminders
 
 ```bash
-marmot remind                      # show what fires and when
-marmot remind --at 50,75,90        # set quota marks
-marmot remind --cap 100            # set a dollar ceiling
-marmot remind --off                # turn reminders off
+marmot remind                                # each window, its marks, and where it stands now
+marmot remind --at 50,75,90                  # marks for every window
+marmot remind --window session --at 90       # one window: session, weekly, weekly-model
+marmot remind --window weekly --at none      # silence one window
+marmot remind --turns 10,15,20               # long-session marks, every plan
+marmot remind --turns none                   # silence long-session nudges
+marmot remind --reset                        # back to the defaults
+marmot remind --cap 100                      # dollar ceiling (Enterprise and API)
+marmot remind --off                          # turn limit reminders off
 ```
 
-Marmot chooses the useful ceiling from the plan it can read:
+```text
+  Reminders · Max 20×
 
-| Plan | Ceiling |
+  Claude enforces these limits on your plan. You hear as each one reaches a mark:
+
+    5-hour session   50%, 75%, 90%  now 12%, resets in 2.0h
+    Weekly           50%, 75%, 90%  now 40%, resets in 2.5d
+
+  There is no daily limit: Claude's windows are five hours and a week.
+  Dollar caps stay quiet: the plan is paid for, so allowance is what runs out.
+  Long sessions: 10, 15, 20 prompts in one session, on every plan, compacted or not.
+```
+
+Claude enforces two kinds of window on a subscription: a rolling **5-hour
+session** and a **week** (plus a weekly limit on some models). There is no
+daily limit. Marmot chooses the ceiling from the plan it can read:
+
+| Plan | What interrupts you |
 |---|---|
-| **Pro, Max, most Team seats** | Reported quota, at 50%, 75% and 90% by default |
-| **Enterprise or a plan reporting no quota** | Daily dollar cap; session cap is half |
-| **Pay-as-you-go API** | Dollar cap, because the figure is the bill |
+| **Pro, Max, Team** | Claude's limits, at 50%, 75% and 90% of each window. Never a dollar cap. |
+| **Enterprise** | Daily and session dollar caps, plus limits if the plan reports them |
+| **Pay-as-you-go API** | Dollar caps, because the figure is the bill |
+
+A subscription whose limit reading is missing or stale does not fall back to
+dollars. The hook asks Claude Code for a fresh reading in the background
+(`claude -p /usage`, no tokens), and the next turn judges against it.
+
+**Long sessions** are the same on every plan: a nudge at 10, 15 and 20 prompts
+you typed, each once per session. Compacting does not reset the count, because
+it trims what a session carries without making it a new one. Only prompts you
+typed count—tool results and model turns do not. Set your own series with
+`marmot remind --turns`, or `session.turnMarks` in the config.
 
 Only one live nudge interrupts at a time. After one fires, Marmot leaves 20
 minutes of quiet before another (`interrupt.minGapMins`). Held findings remain
@@ -273,8 +317,8 @@ Refreshing limits also captures Claude Code's own attribution of your usage:
           top mcp servers: sprinto 1%
 ```
 
-This is not inferred from transcripts. `limit-drivers` quotes Claude Code's
-attribution when a share passes `limits.driverMinPercent`—60% by default.
+This is not inferred from transcripts. It is not a nudge of its own: when it
+explains enough of the burn, it becomes the middle sentence of a limit nudge.
 
 The source is human-formatted text with no stability guarantee. Every line is
 optional; unrecognised lines are skipped, so a format change costs this section
@@ -306,7 +350,9 @@ it resets:
     "Team":       [50, 75, 90],
     "Enterprise": [50, 75, 90],
     "API":        []
-  }
+  },
+  // Per window, ahead of the plan: "session", "weekly_all", "weekly_scoped".
+  "byWindow": { "session": [90] }
 }
 ```
 
@@ -314,13 +360,13 @@ it resets:
 
 | Rule | Fires when | Default |
 |---|---|---|
-| `session-cost` | One session's modelled cost | > $25 |
-| `daily-cost` | Today's total | > $50 |
-| `daily-baseline` | Today against your trailing average | > 2.5σ over 14 days |
+| `session-cost` | One session's cost — Enterprise and API only | > $25 |
+| `daily-cost` | Today's total — Enterprise and API only | > $50 |
+| `daily-baseline` | Today against your trailing average — Enterprise and API only | > 2.5σ over 14 days |
+| `session-turns` | Prompts you typed in one session — any plan, compacted or not | 10, 15, 20 |
 | `session-topics` | A long session resumed in a different area | > 1 day gap, ≥ 2 areas |
 | `limit-reached` | A plan window crosses a configured mark | 50%, 75%, 90% |
 | `limit-pace` | Allowance is disappearing faster than the window | > 1.5× pace, ≥ 15% elapsed, ≥ 20% used |
-| `limit-drivers` | Claude Code attributes a large share to one behavior | > 60% |
 
 Idle MCP servers, subagent burn, carried history, quiet premium-model work and
 failing tools are now ranked as **causes** behind these thresholds. They explain
@@ -331,8 +377,8 @@ a nudge instead of creating a second, duplicated alarm.
 ```jsonc
 {
   // Rules allowed to interrupt at the end of a turn.
-  "live": ["limit-reached", "session-cost", "daily-cost",
-           "daily-baseline"],
+  "live": ["limit-reached", "session-turns", "session-cost",
+           "daily-cost", "daily-baseline"],
 
   "interrupt": { "minGapMins": 20, "maxPerNudge": 1 },
 
@@ -346,16 +392,19 @@ a nudge instead of creating a second, duplicated alarm.
   "digest": { "cadence": "daily" },
 
   "limits": { "enabled": true, "causeFloor": 0.08,
-              "steps": [50, 75, 90],
+              "steps": [50, 75, 90], "byWindow": {},
               "autoRefresh": true, "paceRatio": 1.5,
-              "paceMinElapsed": 15, "paceMinUsed": 20,
-              "driverMinPercent": 60 },
+              "paceMinElapsed": 15, "paceMinUsed": 20 },
 
   "browse": { "keep": 5 },
   "mcp": { "enabled": true, "autoAudit": true,
            "auditMaxAgeDays": 7 },
 
-  "session": { "costCap": 25, "turnCap": 20, "costFloor": 1 },
+  // What the hooks decided, and what you were shown.
+  "log": { "hooks": true, "notifications": true },
+
+  // turnMarks: every plan. costCap and daily: Enterprise and API only.
+  "session": { "turnMarks": [10, 15, 20], "costCap": 25, "costFloor": 1 },
   "daily": { "costCap": 50, "baselineSigma": 2.5,
              "baselineDays": 14 },
 
@@ -376,6 +425,9 @@ marmot init --statusline
 ```text
 $12.40 · 57 prompts · 41% ctx · 97% cache · Opus ▲
 ```
+
+The prompt count turns yellow at the first long-session mark. The cost does so
+past `session.costCap` only on Enterprise and API, where it is the ceiling.
 
 The statusline is separate because installing it replaces an existing Claude
 Code statusline.
@@ -431,6 +483,23 @@ rule's outcome:
 That is usually enough to tell a wrong threshold from a rule that never ran.
 It is capped, and local like everything else; `marmot config set
 log.hooks=false` turns it off.
+
+### What you were shown
+
+The hook log says what each run decided. The notification catalog says what
+reached you: every nudge, daily digest and test notification, in the words it
+used, with the rules behind it, the plan it was judged against, and the channel
+it went out on.
+
+```bash
+marmot notifications          # newest first
+marmot notifications --json   # raw JSONL, oldest first
+marmot notifications --path   # ~/.claude/marmot-notifications.jsonl
+```
+
+"Sent" means handed to the desktop, not seen: Focus and Do Not Disturb drop
+notifications silently. `marmot config set log.notifications=false` turns the
+catalog off.
 
 ## Notifications not appearing?
 
