@@ -12,6 +12,9 @@ final class Store: ObservableObject {
     @Published var loading = false
     @Published var refreshingLimits = false
     @Published var lastRefreshNote: String?
+    /// The expanded usage window's payloads, one per range in days.
+    @Published var usage: [Int: Status] = [:]
+    @Published var usageLoading: Set<Int> = []
 
     private let engine = Engine.shared
     private var timer: Timer?
@@ -32,6 +35,9 @@ final class Store: ObservableObject {
     func start() {
         guard timer == nil else { return }
         Task {
+            // Tick first: its heartbeat is what tells the engine's alert() the
+            // app is here to post notifications, instead of opening a dialog.
+            await tick()
             await loadStatus()
             await maybeRefreshLimits()
         }
@@ -66,6 +72,37 @@ final class Store: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    func loadUsage(days: Int) async {
+        guard !usageLoading.contains(days) else { return }
+        usageLoading.insert(days)
+        defer { usageLoading.remove(days) }
+        do {
+            let (status, _) = try await engine.json(Status.self, ["status", "--json", "--days", String(days)], timeout: 90)
+            usage[days] = status
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Sends a real test through the engine, the same `alert()` a nudge takes,
+    /// then ticks at once so the app shows it now rather than within a minute.
+    func sendEngineTest(digest: Bool) async {
+        await tick()
+        _ = await runText(["test-notification"] + (digest ? ["--digest"] : []))
+        await tick()
+    }
+
+    /// Back to the plan's marks for one window.
+    func resetWindow(key: String, windowArg: String) async {
+        let path = "limits.byWindow.\(key)"
+        pendingWrites[path]?.cancel()
+        pendingWrites[path] = nil
+        pendingValues[path] = nil
+        config = ConfigPath.removing(config, path.split(separator: ".").map(String.init))
+        _ = await runText(["remind", "--window", windowArg, "--reset"])
+        await loadStatus()
     }
 
     func tick() async {
@@ -141,7 +178,7 @@ final class Store: ObservableObject {
     func value(_ path: String) -> Any? { ConfigPath.value(config, path) }
 
     /// Updates the UI now, writes through `marmot config set` shortly after.
-    func set(_ path: String, _ value: Any, debounce: Bool = true) {
+    func set(_ path: String, _ value: Any, debounce: Bool = true, delay: Double = 0.6) {
         config = ConfigPath.setting(config, path.split(separator: ".").map(String.init), value)
         pendingValues[path] = value
         pendingWrites[path]?.cancel()
@@ -149,7 +186,7 @@ final class Store: ObservableObject {
             Task { @MainActor in await self?.flush(path) }
         }
         pendingWrites[path] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + (debounce ? 0.6 : 0), execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (debounce ? delay : 0), execute: work)
     }
 
     private func flush(_ path: String) async {

@@ -19,6 +19,8 @@ struct Status: Decodable {
     var recent: [RecentNudge]?
     var hooks: Hooks?
     var paths: Paths?
+    /// Effective notification marks per window: `session`, `weekly_all`, `weekly_scoped`.
+    var limitMarks: [String: WindowMarks]?
 
     var usableLimits: [Limit] { (limits ?? []).filter { $0.usable ?? !($0.expired ?? false) } }
     var tightestLimit: Limit? { usableLimits.max { ($0.percent ?? 0) < ($1.percent ?? 0) } }
@@ -39,6 +41,8 @@ struct Limit: Decodable, Identifiable {
     var resetsAt: String?
     var expired: Bool?
     var usable: Bool?
+    /// The window rolled over since the last reading: shown at 0% until the next one.
+    var justReset: Bool?
     var pace: Pace?
 
     var id: String { (kind ?? "") + (label ?? "") }
@@ -75,11 +79,28 @@ struct WindowTotals: Decodable {
     var cacheHitRate: Double?
 }
 
+/// One local calendar day, bucketed per assistant turn.
 struct Day: Decodable, Identifiable {
     var day: String
     var cost: Double?
     var tokens: Double?
+    var models: [DayModel]?
     var id: String { day }
+
+    func value(_ metric: String) -> Double { metric == "tokens" ? (tokens ?? 0) : (cost ?? 0) }
+}
+
+struct DayModel: Decodable {
+    var model: String
+    var cost: Double?
+    var tokens: Double?
+
+    func value(_ metric: String) -> Double { metric == "tokens" ? (tokens ?? 0) : (cost ?? 0) }
+}
+
+struct WindowMarks: Decodable {
+    var marks: [Int]?
+    var custom: Bool?
 }
 
 struct ModelShare: Decodable, Identifiable {
@@ -174,6 +195,24 @@ enum ConfigPath {
         return copy
     }
 
+    static func removing(_ config: [String: Any], _ path: [String]) -> [String: Any] {
+        guard let first = path.first else { return config }
+        var copy = config
+        if path.count == 1 {
+            copy.removeValue(forKey: first)
+        } else if let child = copy[first] as? [String: Any] {
+            copy[first] = removing(child, Array(path.dropFirst()))
+        }
+        return copy
+    }
+
+    /// A JSON array of whole numbers, whichever way it was bridged.
+    static func ints(_ value: Any?) -> [Int]? {
+        if let ints = value as? [Int] { return ints }
+        guard let array = value as? [Any] else { return nil }
+        return array.compactMap { ($0 as? NSNumber)?.intValue ?? ($0 as? Int) }
+    }
+
     /// The value as `config set` wants it: JSON, so numbers, booleans and arrays mean themselves.
     static func encode(_ value: Any) -> String {
         if let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
@@ -253,6 +292,43 @@ enum Fmt {
         let f = DateFormatter()
         f.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "d MMM HH:mm"
         return f.string(from: date)
+    }
+
+    private static let dayParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let dayPrinter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
+    /// `status.daily[].day` is a local calendar day.
+    static func localDay(_ day: String) -> Date? { dayParser.date(from: day) }
+
+    static func dayLabel(_ date: Date) -> String { dayPrinter.string(from: date) }
+
+    static func dayLabel(_ day: String?) -> String {
+        guard let day, let date = localDay(day) else { return day ?? "" }
+        return dayLabel(date)
+    }
+
+    /// Cost or tokens, as the chart toggle says.
+    static func metric(_ value: Double?, _ metric: String) -> String {
+        metric == "tokens" ? tokens(value) : usd(value)
+    }
+
+    /// Short enough for an axis label.
+    static func axis(_ value: Double, metric: String) -> String {
+        if metric == "tokens" { return tokens(value) }
+        if value >= 1000 { return String(format: "$%.1fK", value / 1000) }
+        if value >= 10 || value == 0 { return String(format: "$%.0f", value) }
+        return String(format: "$%.1f", value)
     }
 
     static func shortModel(_ model: String) -> String {

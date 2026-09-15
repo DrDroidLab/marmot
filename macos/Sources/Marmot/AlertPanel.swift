@@ -85,7 +85,7 @@ struct AlertCard: View {
                 Text(title).font(.headline).fixedSize(horizontal: false, vertical: true)
                 Text(message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Button("Open Marmot", action: open).buttonStyle(.link)
+                    Button("View Insights in Browser", action: open).buttonStyle(.link)
                     Spacer()
                     Button("Dismiss", action: dismiss).keyboardShortcut(.defaultAction)
                 }

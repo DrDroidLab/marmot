@@ -4,7 +4,10 @@ import SwiftUI
 struct MenuView: View {
     @EnvironmentObject var store: Store
     @Environment(\.openSettings) private var openSettings
-    @State private var showAllRecs = false
+    /// The one recommendation opened in place, if any. One at a time, so the
+    /// menu grows by a line or two at most.
+    @State private var expandedRec: Int?
+    @AppStorage("chartMetric") private var metric = "cost"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -26,10 +29,6 @@ struct MenuView: View {
                 chart(status)
                 divider
                 recommendations(status)
-                if let nudges = status.nudges, !nudges.isEmpty {
-                    divider
-                    standing(nudges)
-                }
             } else if store.lastError == nil {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -96,7 +95,8 @@ struct MenuView: View {
                     }
                 }
             }
-            ForEach(usable) { limit in
+            // A per-model weekly limit at 0% says nothing; it earns a row once used.
+            ForEach(usable.filter { !($0.kind == "weekly_scoped" && ($0.percent ?? 0) == 0) }) { limit in
                 LimitRow(limit: limit)
             }
             if let spend = status.spend, spend.enabled == true {
@@ -138,58 +138,86 @@ struct MenuView: View {
     @ViewBuilder
     private func chart(_ status: Status) -> some View {
         let days = Array((status.daily ?? []).suffix(14))
-        if days.contains(where: { ($0.cost ?? 0) > 0 }) {
-            UsageChart(days: days, today: status.today?.day)
-                .padding(.top, 10)
-        }
-        if let models = status.models, !models.isEmpty {
-            Text(models.prefix(3).map { "\(Fmt.shortModel($0.model)) \(Int((($0.share ?? 0) * 100).rounded()))%" }.joined(separator: " · "))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 6)
+        if days.contains(where: { ($0.cost ?? 0) > 0 || ($0.tokens ?? 0) > 0 }) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("Last 14 days").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("Metric", selection: $metric) {
+                        Text("Cost").tag("cost")
+                        Text("Tokens").tag("tokens")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(width: 120)
+                    Button {
+                        UsageWindowController.shared.show()
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Expand")
+                }
+                UsageChart(days: days, today: status.today?.day, metric: metric)
+            }
+            .padding(.top, 10)
         }
     }
 
     // MARK: recommendations
 
+    /// Two lines at most, one line each: the menu is a glance, not a reading
+    /// list. Click one to see what to do; everything lives in the window.
     private func recommendations(_ status: Status) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Recommendations").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            let all = (status.recommendations ?? []).filter { $0.line != nil }
-            let recs = showAllRecs ? all : Array(all.prefix(3))
-            if all.isEmpty {
+        let items = AttentionItem.all(status)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Recommendations").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if items.count > 2 {
+                    Button("See all \(items.count) ›") { UsageWindowController.shared.show(tab: .recommendations) }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            if items.isEmpty {
                 Text("Nothing to fix right now.").font(.callout).foregroundStyle(.secondary)
             }
-            ForEach(Array(recs.enumerated()), id: \.offset) { _, rec in
-                HStack(alignment: .top, spacing: 8) {
-                    Circle().fill(Color.orange).frame(width: 6, height: 6).padding(.top, 6)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(rec.line ?? "").font(.callout).wraps()
-                        if let action = rec.action {
-                            Text(action).font(.caption).foregroundStyle(.secondary).wraps()
+            ForEach(Array(items.prefix(2).enumerated()), id: \.offset) { index, item in
+                let open = expandedRec == index
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { expandedRec = open ? nil : index }
+                } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle().fill(item.color).frame(width: 6, height: 6).padding(.top, 6)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.headline)
+                                .font(.callout)
+                                .lineLimit(open ? nil : 1)
+                                .truncationMode(.tail)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if open {
+                                if let detail = item.detail, detail != item.headline {
+                                    Text(detail).font(.caption).foregroundStyle(.secondary).wraps()
+                                }
+                                if let action = item.action {
+                                    Text(action).font(.caption).foregroundStyle(.secondary).wraps()
+                                }
+                            }
                         }
+                        Spacer(minLength: 4)
+                        Image(systemName: open ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 3)
                     }
+                    .contentShape(Rectangle())
                 }
-            }
-            if all.count > 3 {
-                Button(showAllRecs ? "Show less" : "Show \(all.count - 3) more") { showAllRecs.toggle() }
-                    .buttonStyle(.plain)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.leading, 14)
-            }
-        }
-    }
-
-    private func standing(_ nudges: [Nudge]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Standing").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            ForEach(Array(nudges.prefix(4).enumerated()), id: \.offset) { _, nudge in
-                HStack(alignment: .top, spacing: 8) {
-                    Circle().fill(nudge.urgent == true ? Color.red : Color.orange).frame(width: 6, height: 6).padding(.top, 6)
-                    Text(nudge.label ?? nudge.id ?? "").font(.callout).wraps()
-                }
-                .help(nudge.detail ?? "")
+                .buttonStyle(.plain)
+                .help(open ? "" : item.headline)
             }
         }
     }
@@ -198,7 +226,7 @@ struct MenuView: View {
 
     private var footer: some View {
         VStack(spacing: 1) {
-            MenuRow(title: "Open session browser", systemImage: "safari") { store.openBrowser() }
+            MenuRow(title: "View Insights in Browser", systemImage: "safari") { store.openBrowser() }
             MenuRow(title: "Refresh", systemImage: "arrow.clockwise", shortcut: "⌘R") { store.refreshNow() }
                 .keyboardShortcut("r")
             MenuRow(title: "Settings…", systemImage: "gearshape", shortcut: "⌘,") {
@@ -222,27 +250,31 @@ struct LimitRow: View {
 
     var body: some View {
         let pct = limit.percent ?? 0
+        // One line of text per limit: name, when it resets, how much is gone.
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title).font(.callout)
+                if limit.pace?.exhaustsBeforeReset == true {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .help("Spending this faster than it refills")
+                }
                 Spacer()
+                if limit.justReset == true {
+                    Text("just reset").font(.caption2).foregroundStyle(.secondary)
+                } else if let resets = Fmt.resets(limit.resetsAt) {
+                    Text(resets).font(.caption2).foregroundStyle(.secondary)
+                }
                 Text("\(Int(pct.rounded()))%").font(.callout.monospacedDigit().weight(.semibold))
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.1))
-                    Capsule().fill(color(pct)).frame(width: max(pct > 0 ? 3 : 0, geo.size.width * min(pct, 100) / 100))
+                    Capsule().fill(limitColor(pct)).frame(width: max(pct > 0 ? 3 : 0, geo.size.width * min(pct, 100) / 100))
                 }
             }
             .frame(height: 6)
-            HStack(spacing: 6) {
-                if let resets = Fmt.resets(limit.resetsAt) {
-                    Text(resets).font(.caption2).foregroundStyle(.secondary)
-                }
-                if limit.pace?.exhaustsBeforeReset == true {
-                    Text("· faster than it refills").font(.caption2).foregroundStyle(.orange)
-                }
-            }
         }
     }
 
@@ -255,10 +287,11 @@ struct LimitRow: View {
             return limit.label ?? limit.kind ?? "Limit"
         }
     }
+}
 
-    private func color(_ pct: Double) -> Color {
-        pct >= 80 ? .red : pct >= 50 ? .orange : .green
-    }
+/// Every limit bar: green below 50%, yellow from 50%, red from 75%.
+func limitColor(_ pct: Double) -> Color {
+    pct >= 75 ? .red : pct >= 50 ? .yellow : .green
 }
 
 struct Stat: View {
@@ -271,6 +304,39 @@ struct Stat: View {
             Text(value).font(.title3.monospacedDigit().weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One list for the menu and the window: nudges standing now (a threshold you
+/// set was crossed) first, then recommendations, strongest first.
+struct AttentionItem {
+    let headline: String
+    let detail: String?
+    let action: String?
+    let color: Color
+    let source: String
+
+    static func all(_ status: Status) -> [AttentionItem] {
+        let nudges = (status.nudges ?? []).map { n in
+            AttentionItem(
+                headline: n.label ?? n.id ?? "",
+                detail: n.detail,
+                action: n.action,
+                color: n.urgent == true ? .red : .orange,
+                source: "A threshold you set in Notifications"
+            )
+        }
+        let recs = (status.recommendations ?? []).compactMap { r -> AttentionItem? in
+            guard let line = r.line else { return nil }
+            return AttentionItem(
+                headline: line,
+                detail: nil,
+                action: r.action,
+                color: .blue,
+                source: r.source == "claude-code" ? "Claude Code's own /usage report" : "Measured by Marmot from your session files"
+            )
+        }
+        return nudges + recs
     }
 }
 

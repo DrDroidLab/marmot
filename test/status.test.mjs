@@ -16,11 +16,15 @@ import { fileURLToPath } from "node:url";
 import { buildStatus, tick, dailySeries } from "../src/status.mjs";
 import { appendInbox, appAlive, writeHeartbeat, inboxPath, heartbeatPath } from "../src/inbox.mjs";
 import { loadConfig } from "../src/config.mjs";
+import { loadSessions } from "../src/sessions.mjs";
 import { tmpRoot, writeSession, prompt, response, usage } from "./helpers.mjs";
 
 const CLI = fileURLToPath(new URL("../bin/marmot.mjs", import.meta.url));
 const HOOK = fileURLToPath(new URL("../scripts/hook.mjs", import.meta.url));
 const ENV = { ...process.env, NO_COLOR: "1", MARMOT_NO_NOTIFY: "1", MARMOT_NO_LOG: "1" };
+
+// Local days are the point of the chart, so pin the zone the assertions assume.
+process.env.TZ = "UTC";
 
 /** A Max 20× snapshot with one live weekly window at `percent`. */
 function withPlan(root, percent) {
@@ -51,7 +55,8 @@ test("status carries every section the app reads", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
   costlySession(root);
-  const s = buildStatus({ root, cfg: loadConfig(root), days: 30 });
+  // The fixtures are stamped 2026-09-01, so judge the window from a fixed day.
+  const s = buildStatus({ root, cfg: loadConfig(root), days: 30, now: Date.parse("2026-09-15T12:00:00Z") });
 
   assert.equal(s.version, 1);
   assert.equal(s.daily.length, 30, "one entry per day of the window, zeros included");
@@ -78,8 +83,25 @@ test("status reads the plan and says which limits are live", (t) => {
 
 test("dailySeries fills the days nothing ran", () => {
   const now = Date.parse("2026-09-15T12:00:00Z");
-  const series = dailySeries([{ day: "2026-09-14", cost: 2, tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }], 3, now);
+  const series = dailySeries([{ daily: { "2026-09-14": { cost: 2, tokens: 2, models: { "claude-opus-5": { cost: 2, tokens: 2 } } } } }], 3, now);
   assert.deepEqual(series.map((d) => [d.day, d.cost, d.tokens]), [["2026-09-13", 0, 0], ["2026-09-14", 2, 2], ["2026-09-15", 0, 0]]);
+  assert.deepEqual(series[1].models, [{ model: "claude-opus-5", cost: 2, tokens: 2 }]);
+});
+
+test("the chart files each turn under the day it happened, not the day its session ended", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  writeSession(root, {
+    id: "sess-midnight",
+    entries: [
+      prompt("late"),
+      response({ id: "late-1", u: usage({ input: 100, output: 1_000 }), over: { timestamp: "2026-09-10T23:30:00.000Z" } }),
+      response({ id: "late-2", u: usage({ input: 100, output: 3_000 }), over: { timestamp: "2026-09-11T00:30:00.000Z" } }),
+    ],
+  });
+  const series = dailySeries(loadSessions({ root, days: 30 }), 3, Date.parse("2026-09-11T12:00:00Z"));
+  assert.deepEqual(series.map((d) => [d.day, d.tokens]), [["2026-09-09", 0], ["2026-09-10", 1_100], ["2026-09-11", 3_100]]);
+  assert.equal(series[2].models[0].model, "claude-opus-5");
 });
 
 test("tick announces a crossed mark once, whoever asks twice", (t) => {
@@ -176,4 +198,98 @@ test("the CLI prints status and tick as JSON", (t) => {
   assert.equal(run(["tick", "--app"]).version, 1);
   assert.equal(existsSync(heartbeatPath(root)), true);
   assert.equal(run(["status", "--demo"]).demo, true);
+});
+
+/** A Max 20× snapshot with these windows live: [[kind, percent], ...]. */
+function withLimits(root, windows) {
+  writeFileSync(
+    `${root}.json`,
+    JSON.stringify({
+      oauthAccount: { organizationRateLimitTier: "default_claude_max_20x", billingType: "stripe_subscription" },
+      cachedUsageUtilization: {
+        fetchedAtMs: Date.now(),
+        utilization: {
+          limits: windows.map(([kind, percent]) => ({
+            kind,
+            group: kind === "session" ? "session" : "weekly",
+            percent,
+            severity: "normal",
+            resets_at: new Date(Date.now() + (kind === "session" ? 3 : 48) * 3_600_000).toISOString(),
+            is_active: true,
+          })),
+        },
+      },
+    }),
+  );
+  return () => rmSync(`${root}.json`, { force: true });
+}
+
+test("a window that just reset stays on the menu at 0%, and never nudges", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  writeFileSync(
+    `${root}.json`,
+    JSON.stringify({
+      oauthAccount: { organizationRateLimitTier: "default_claude_max_20x", billingType: "stripe_subscription" },
+      cachedUsageUtilization: {
+        fetchedAtMs: Date.now() - 10 * 60_000,
+        utilization: {
+          limits: [
+            { kind: "session", percent: 92, resets_at: new Date(Date.now() - 2 * 60_000).toISOString(), is_active: true },
+            { kind: "weekly_all", percent: 18, resets_at: new Date(Date.now() + 86_400_000).toISOString(), is_active: true },
+          ],
+        },
+      },
+    }),
+  );
+  t.after(() => rmSync(`${root}.json`, { force: true }));
+  const cfg = loadConfig(root);
+
+  const session = buildStatus({ root, cfg, days: 7 }).limits.find((l) => l.kind === "session");
+  assert.deepEqual(
+    { percent: session.percent, usable: session.usable, justReset: session.justReset, resetsAt: session.resetsAt },
+    { percent: 0, usable: true, justReset: true, resetsAt: null },
+  );
+  assert.deepEqual(tick({ root, cfg }).notifications, [], "the stale 92% must not fire the 90% mark");
+});
+
+test("limitMarks shows the marks each window will really speak at", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  t.after(withLimits(root, [["session", 10], ["weekly_all", 10]]));
+  const cfg = loadConfig(root);
+  cfg.limits = { ...cfg.limits, byWindow: { session: [30, 60], weekly_all: [] } };
+
+  const { limitMarks } = buildStatus({ root, cfg, days: 7 });
+  assert.deepEqual(limitMarks.session, { marks: [30, 60], custom: true });
+  assert.deepEqual(limitMarks.weekly_all, { marks: [], custom: true }, "an empty list silences the window");
+  assert.deepEqual(limitMarks.weekly_scoped, { marks: [50, 75, 90], custom: false }, "no override: the plan's marks");
+});
+
+test("tick nudges at each window's own marks, and never for a silenced window", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  t.after(withLimits(root, [["session", 35], ["weekly_all", 80]]));
+  const cfg = loadConfig(root);
+  cfg.limits = { ...cfg.limits, byWindow: { session: [30], weekly_all: [] } };
+
+  const r = tick({ root, cfg });
+  assert.deepEqual(r.notifications.map((n) => n.key), ["limit-reached:session:30"]);
+  assert.equal(r.held, 0, "the silenced weekly window is not even held back");
+});
+
+test("any number of marks: each one speaks once as usage climbs past it", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const cfg = loadConfig(root);
+  cfg.limits = { ...cfg.limits, byWindow: { weekly_all: [10, 20, 40, 60, 80] } };
+  cfg.interrupt = { ...cfg.interrupt, minGapMins: 0 };
+
+  const heard = [];
+  for (const percent of [15, 25, 25, 45, 85]) {
+    withLimits(root, [["weekly_all", percent]]);
+    heard.push(...tick({ root, cfg }).notifications.map((n) => n.key));
+  }
+  t.after(() => rmSync(`${root}.json`, { force: true }));
+  assert.deepEqual(heard, ["limit-reached:weekly_all:10", "limit-reached:weekly_all:20", "limit-reached:weekly_all:40", "limit-reached:weekly_all:80"]);
 });

@@ -19,9 +19,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { loadSessions, configuredServers, sessionDirs, mcpLastUsed, daysSince } from "./sessions.mjs";
+import { loadSessions, configuredServers, sessionDirs, mcpLastUsed, daysSince, localDay } from "./sessions.mjs";
 import { readPlan, usableLimits, limitPace, readAttribution, paysPerToken } from "./plan.mjs";
-import { evaluate, windowRules } from "./rules.mjs";
+import { evaluate, windowRules, limitSteps } from "./rules.mjs";
 import { allDiagnoses } from "./diagnose.mjs";
 import { totals } from "./render.mjs";
 import { readLog, append as logAppend, hookWiring, hooksMissing, planTrace } from "./hooklog.mjs";
@@ -34,20 +34,43 @@ import { mins } from "./format.mjs";
 const tokenSum = (s) => s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite;
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
 
-/** One entry per day of the window, oldest first, zero where nothing ran. */
+/**
+ * One entry per local day of the window, oldest first, zero where nothing ran,
+ * with each day's model split, dearest first.
+ *
+ * Built from the per-turn buckets the reader keeps, so a long session is spread
+ * over the days it actually ran. A record without them (demo sessions) falls
+ * back to its end day.
+ */
 export function dailySeries(sessions, days, now = Date.now()) {
   const by = new Map();
   for (const s of sessions) {
-    const d = by.get(s.day) ?? { cost: 0, tokens: 0 };
-    d.cost += s.cost;
-    d.tokens += tokenSum(s);
-    by.set(s.day, d);
+    const buckets = s.daily ?? (s.day ? { [s.day]: { cost: s.cost ?? 0, tokens: s.tokens ? tokenSum(s) : 0, models: {} } } : {});
+    for (const [day, b] of Object.entries(buckets)) {
+      const d = by.get(day) ?? { cost: 0, tokens: 0, models: {} };
+      d.cost += b.cost;
+      d.tokens += b.tokens;
+      for (const [m, v] of Object.entries(b.models ?? {})) {
+        const mm = (d.models[m] ??= { cost: 0, tokens: 0 });
+        mm.cost += v.cost;
+        mm.tokens += v.tokens;
+      }
+      by.set(day, d);
+    }
   }
   const out = [];
   for (let i = days - 1; i >= 0; i -= 1) {
-    const day = dayOf(now - i * 86_400_000);
-    const d = by.get(day) ?? { cost: 0, tokens: 0 };
-    out.push({ day, cost: d.cost, tokens: d.tokens });
+    // Noon, then step by calendar days: stepping by 24h crosses a DST change
+    // and repeats or skips a day.
+    const at = new Date(now);
+    at.setHours(12, 0, 0, 0);
+    at.setDate(at.getDate() - i);
+    const day = localDay(at);
+    const d = by.get(day) ?? { cost: 0, tokens: 0, models: {} };
+    const models = Object.entries(d.models)
+      .sort((a, b) => b[1].cost - a[1].cost)
+      .map(([model, v]) => ({ model, cost: v.cost, tokens: v.tokens }));
+    out.push({ day, cost: d.cost, tokens: d.tokens, models });
   }
   return out;
 }
@@ -55,6 +78,14 @@ export function dailySeries(sessions, days, now = Date.now()) {
 function limitRows(plan, now) {
   const usable = new Set(usableLimits(plan));
   return (plan?.limits ?? []).map((l) => {
+    // The window this reading described has rolled over. The old percentage is
+    // wrong, but the new one is not unknown: a fresh window starts at zero. So
+    // the row stays, at 0% and marked as just reset, until the next reading —
+    // rather than vanishing from the menu. Display only: the rules still skip
+    // expired readings, so a reset can never fire a nudge.
+    if (l.expired) {
+      return { kind: l.kind, label: l.label, percent: 0, resetsAt: null, expired: true, usable: true, justReset: true, pace: null };
+    }
     const p = limitPace(l, now);
     return {
       kind: l.kind,
@@ -143,8 +174,11 @@ export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions =
   const p = plan ?? readPlan(root, { now });
   const attribution = demo ? null : readAttribution(root);
   const t = totals(all);
-  const today = dayOf(now);
-  const todays = all.filter((s) => s.day === today);
+  const series = dailySeries(all, days, now);
+  const last = series[series.length - 1] ?? { day: localDay(now), cost: 0, tokens: 0 };
+  const today = last.day;
+  // Sessions that did any work today, where the user is.
+  const todays = all.filter((s) => s.daily?.[today]);
 
   const dirs = demo ? [] : sessionDirs(all);
   const configured = demo ? [] : configuredServers(root, dirs);
@@ -185,15 +219,33 @@ export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions =
     plan: { name: p.plan ?? null, paysPerToken: paysPerToken(p.plan), fetchedAt: p.fetchedAt ?? null, ageMins: p.ageMins ?? null, stale: p.stale !== false },
     limits: limitRows(p, now),
     spend: p.spend ?? null,
+    // The marks each window will actually speak at, resolved the way the rules
+    // resolve them (per window, then per plan, then the shared default), so the
+    // settings window shows what will happen rather than what is typed.
+    limitMarks: Object.fromEntries(
+      ["session", "weekly_all", "weekly_scoped"].map((kind) => [
+        kind,
+        { marks: limitSteps(cfg, p.plan, kind), custom: Object.prototype.hasOwnProperty.call(cfg.limits?.byWindow ?? {}, kind) },
+      ]),
+    ),
     today: {
       day: today,
-      cost: todays.reduce((a, s) => a + s.cost, 0),
-      tokens: todays.reduce((a, s) => a + tokenSum(s), 0),
+      cost: last.cost,
+      tokens: last.tokens,
       sessions: todays.length,
-      prompts: todays.reduce((a, s) => a + s.typedPrompts, 0),
+      prompts: all.reduce((a, s) => a + (s.promptTimes ?? []).filter((ts) => localDay(ts) === today).length, 0),
     },
-    window: { days, cost: t.cost, tokens: t.tok, sessions: t.sessions, prompts: t.prompts, cacheHitRate: t.cacheHitRate },
-    daily: dailySeries(all, days, now),
+    // Summed from the same local-day buckets as the chart, so the totals and
+    // the bars cannot disagree.
+    window: {
+      days,
+      cost: series.reduce((a, d) => a + d.cost, 0),
+      tokens: series.reduce((a, d) => a + d.tokens, 0),
+      sessions: t.sessions,
+      prompts: t.prompts,
+      cacheHitRate: t.cacheHitRate,
+    },
+    daily: series,
     models: Object.entries(t.models)
       .sort((a, b) => b[1] - a[1])
       .map(([model, cost]) => ({ model, cost, tokens: modelTokens[model] ?? 0, share: t.cost ? cost / t.cost : 0 })),
