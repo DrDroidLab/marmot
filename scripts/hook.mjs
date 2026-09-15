@@ -28,8 +28,23 @@ import { usd } from "../src/format.mjs";
 import { alert, notifyStyle } from "../src/notify.mjs";
 import { readPlan, refreshUsage, worthRefreshing, readAttribution } from "../src/plan.mjs";
 import { logging, append as logAppend, planTrace } from "../src/hooklog.mjs";
+import { appAlive, appendInbox } from "../src/inbox.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
+
+/**
+ * Hand a notification to the menu bar app when it is running, and fall back to
+ * `alert()` when it is not — or when the handoff could not be written. The app
+ * posts a real notification with the marmot on it, which is what a dialog was
+ * standing in for. `appBody` is the full nudge: a notification always has room
+ * for what to do about it.
+ */
+function deliver(cfg, root, msg, appBody = msg.body) {
+  if (cfg.notify?.desktop !== false && appAlive(root) && appendInbox(root, { ...msg, body: appBody })) {
+    return { style: "app", desktop: { via: "Marmot app" }, bell: false };
+  }
+  return alert(cfg, msg);
+}
 
 const emit = (event, message) => {
   if (message && message.trim()) {
@@ -107,7 +122,7 @@ if (event === "SessionStart") {
     ...(nudges.windowNudges ?? []).map((n) => ({ id: n.key ?? n.id, fired: true })),
   ];
   if (body.trim()) {
-    const did = alert(cfg, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), kind: "digest" });
+    const did = deliver(cfg, root, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), kind: "digest", id: "digest", key: `digest:${today}` });
     trace.notify = { style: did.style, via: did.desktop?.via ?? did.desktop?.cmd ?? null, bell: did.bell };
   }
   emit(event, body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`);
@@ -220,17 +235,21 @@ const show = lines.slice(0, Math.max(1, cfg.interrupt?.maxPerNudge ?? 1));
 markNudged(state);
 writeState(state, root);
 
-const did = alert(cfg, {
-  title: `Marmot · ${show[0].label}`,
-  // A banner gets the one line it has room for. A dialog has room for the whole
-  // nudge, so it carries what to do about it too — which is the half that
-  // makes it worth interrupting for.
-  body:
-    (notifyStyle(cfg, show[0].urgent) === "alert"
-      ? `${show[0].detail}\n\n${show[0].action}`
-      : show[0].detail) + (lines.length > 1 ? `\n\n${lines.length - 1} more in \`marmot\`.` : ""),
-  urgent: show[0].urgent,
-});
+const more = lines.length > 1 ? `\n\n${lines.length - 1} more in \`marmot\`.` : "";
+const did = deliver(
+  cfg,
+  root,
+  {
+    title: `Marmot · ${show[0].label}`,
+    // A banner gets the one line it has room for. A dialog has room for the whole
+    // nudge, so it carries what to do about it too — which is the half that
+    // makes it worth interrupting for.
+    body: (notifyStyle(cfg, show[0].urgent) === "alert" ? `${show[0].detail}\n\n${show[0].action}` : show[0].detail) + more,
+    urgent: show[0].urgent,
+    id: show[0].label,
+  },
+  `${show[0].detail}\n\n${show[0].action}${more}`,
+);
 trace.outcome = "nudged";
 trace.nudge = show.map((l) => l.label);
 trace.notify = { style: did.style, via: did.desktop?.via ?? did.desktop?.cmd ?? null, bell: did.bell };

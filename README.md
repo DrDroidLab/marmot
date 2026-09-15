@@ -36,6 +36,22 @@ marmot doctor
 Want to look first? `marmot --demo` uses synthetic data and reads none of your
 sessions.
 
+### Menu bar app (macOS)
+
+```bash
+brew install --cask drdroidlab/tap/marmot
+```
+
+Marmot in the menu bar: your plan limits, today's and this month's modelled
+cost, a 14-day chart, and the recommendations from the report — one click from
+the clock. Its Settings window edits the same `~/.claude/marmot.json` the CLI
+does, so every threshold below has a control.
+
+While the app is running, the hooks hand their nudges to it instead of opening
+a dialog, and it also checks your limits between turns. It needs Node 18+ (the
+cask installs it) and ships its own copy of the CLI, linked as `marmot`. Build
+it yourself with `macos/scripts/package.sh`; see [`macos/README.md`](macos/README.md).
+
 ## What a nudge looks like
 
 <p align="center">

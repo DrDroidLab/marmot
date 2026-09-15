@@ -99,6 +99,9 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
 | `src/hooklog.mjs` | What the hooks did and why, plus where they are installed. |
+| `src/status.mjs` | The menu bar app's payloads: `status` (everything it shows) and `tick` (nudges to post between turns, sharing `state.mjs` with the hooks). |
+| `src/inbox.mjs` | App heartbeat + inbox. A hook hands its nudge to a running app instead of a dialog. |
+| `macos/` | The Swift menu bar app. Draws what `status` returns and never re-implements a rule; `macos/scripts/package.sh` builds the .app with this engine inside it. |
 | `src/render.mjs` | Terminal output. |
 | `src/html.mjs` | The self-contained browser page (one template function). |
 | `src/demo.mjs` | Deterministic synthetic sessions for `--demo`. |

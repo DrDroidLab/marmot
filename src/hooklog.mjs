@@ -152,7 +152,8 @@ export function hookWiring(root, { cwd = process.cwd(), self = null } = {}) {
           if (!command.toLowerCase().includes("marmot")) continue;
           // The script is the quoted path in `node "…/hook.mjs"`; an
           // unquoted or templated command has none to check.
-          const file = (command.match(/"([^"]+)"/) ?? [])[1] ?? null;
+          // A bundled install quotes the node binary too, so prefer the script.
+          const file = (command.match(/"([^"]+\.mjs)"/) ?? command.match(/"([^"]+)"/) ?? [])[1] ?? null;
           out.push({
             scope,
             settings: path,
