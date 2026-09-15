@@ -41,13 +41,20 @@ export function logging(cfg, env = process.env) {
 
 /** Append one record. Returns what it did, for the tests; never throws. */
 export function append(root, entry, { cfg = null, now = Date.now() } = {}) {
-  const p = logPath(root);
+  return appendJsonl(logPath(root), entry, { keep: cfg?.log?.keep ?? 500, now });
+}
+
+/**
+ * The writer behind every capped JSONL record Marmot keeps: this log, and the
+ * notification catalog. Timestamped, append-only, never throws.
+ */
+export function appendJsonl(p, entry, { keep = 500, maxBytes = MAX_BYTES, now = Date.now() } = {}) {
   try {
     const line = JSON.stringify({ at: new Date(now).toISOString(), ...entry });
     appendFileSync(p, `${line}\n`);
     // Trimming costs a full read, so it happens on size rather than every
     // write — this runs at the end of every assistant turn.
-    if (statSync(p).size > MAX_BYTES) trim(root, cfg?.log?.keep ?? 500);
+    if (statSync(p).size > maxBytes) trimJsonl(p, keep);
     return true;
   } catch {
     return false;
@@ -55,8 +62,9 @@ export function append(root, entry, { cfg = null, now = Date.now() } = {}) {
 }
 
 /** Keep the newest `keep` lines. */
-export function trim(root, keep = 500) {
-  const p = logPath(root);
+export const trim = (root, keep = 500) => trimJsonl(logPath(root), keep);
+
+export function trimJsonl(p, keep = 500) {
   try {
     const lines = readFileSync(p, "utf8").split("\n").filter(Boolean);
     if (lines.length <= keep) return lines.length;
@@ -72,8 +80,9 @@ export function trim(root, keep = 500) {
  * two hooks can finish at the same moment, and a torn write should cost one
  * record rather than the whole history.
  */
-export function readLog(root, { limit = 20 } = {}) {
-  const p = logPath(root);
+export const readLog = (root, opts) => readJsonl(logPath(root), opts);
+
+export function readJsonl(p, { limit = 20 } = {}) {
   if (!existsSync(p)) return { path: p, exists: false, entries: [], skipped: 0 };
   let skipped = 0;
   const entries = [];
@@ -96,7 +105,7 @@ export function readLog(root, { limit = 20 } = {}) {
 /**
  * The plan, reduced to what actually decides a nudge.
  *
- * These four are exactly what `dollarsAreBilled()` reads. Writing them down
+ * These four are exactly what `dollarCapsApply()` reads. Writing them down
  * next to the outcome is what turns "why did this fire" into one glance.
  */
 export function planTrace(plan) {

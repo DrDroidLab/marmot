@@ -92,7 +92,19 @@ test("a state file missing its fields degrades to the defaults", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
   writeFileSync(join(root, "marmot-state.json"), JSON.stringify({ somethingElse: 1 }));
-  assert.deepEqual(readState(root), { digestShownOn: null, fired: {}, lastNudgeAt: null });
+  assert.deepEqual(readState(root), { somethingElse: 1, digestShownOn: null, fired: {}, lastNudgeAt: null });
+});
+
+test("fields the hook keeps in state survive a read", (t) => {
+  // readState used to rebuild the object from three known keys, which dropped
+  // `dailyCache` on every read — so the throttle it existed for never held.
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const cache = { day: "2026-09-15", at: 1, sessions: [] };
+  writeState({ digestShownOn: null, fired: {}, lastNudgeAt: null, dailyCache: cache, refreshStartedAt: 5 }, root);
+  const s = readState(root);
+  assert.deepEqual(s.dailyCache, cache);
+  assert.equal(s.refreshStartedAt, 5);
 });
 
 test("an unwritable location does not throw", () => {

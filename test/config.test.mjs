@@ -13,17 +13,17 @@ test("with no config file the defaults apply and say so", (t) => {
   const cfg = loadConfig(root);
   assert.equal(cfg._exists, false);
   assert.equal(cfg._path, configPath(root));
-  assert.equal(cfg.session.turnCap, DEFAULTS.session.turnCap);
+  assert.deepEqual(cfg.session.turnMarks, DEFAULTS.session.turnMarks);
   assert.equal(cfg.daily.costCap, DEFAULTS.daily.costCap);
 });
 
 test("an override replaces one value and leaves its siblings alone", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
-  write(root, { session: { turnCap: 5 } });
+  write(root, { session: { turnMarks: [5] } });
   const cfg = loadConfig(root);
   assert.equal(cfg._exists, true);
-  assert.equal(cfg.session.turnCap, 5);
+  assert.deepEqual(cfg.session.turnMarks, [5]);
   assert.equal(cfg.session.costCap, DEFAULTS.session.costCap, "siblings survive the merge");
   assert.equal(cfg.daily.costCap, DEFAULTS.daily.costCap, "other sections survive too");
 });
@@ -70,7 +70,7 @@ test("a malformed config falls back to defaults and warns on stderr", (t) => {
     process.stderr.write = original;
   }
 
-  assert.equal(cfg.session.turnCap, DEFAULTS.session.turnCap);
+  assert.deepEqual(cfg.session.turnMarks, DEFAULTS.session.turnMarks);
   assert.equal(cfg._exists, false, "a file we could not read is not a config");
   assert.match(written.join(""), /ignoring malformed/);
 });
@@ -80,7 +80,7 @@ test("an empty object config is simply the defaults", (t) => {
   t.after(cleanup);
   write(root, {});
   const cfg = loadConfig(root);
-  assert.equal(cfg.session.turnCap, DEFAULTS.session.turnCap);
+  assert.deepEqual(cfg.session.turnMarks, DEFAULTS.session.turnMarks);
   assert.equal(cfg._exists, true);
 });
 
@@ -88,7 +88,7 @@ test("loadConfig never mutates DEFAULTS", (t) => {
   const { root, cleanup } = tmpRoot();
   t.after(cleanup);
   const before = JSON.stringify(DEFAULTS);
-  write(root, { session: { turnCap: 999 }, models: { premium: ["x"] } });
+  write(root, { session: { turnMarks: [999] }, models: { premium: ["x"] } });
   loadConfig(root);
   assert.equal(JSON.stringify(DEFAULTS), before);
 });
@@ -104,7 +104,7 @@ test("every rule in `live` is a rule that exists", async () => {
 test("the defaults carry a ratio gap, a sample and a dollar floor", () => {
   // The three guards every rule is required to have. If one goes missing from
   // the defaults, the rule it belongs to starts firing on everything.
-  assert.ok(DEFAULTS.session.turnCap > 0);
+  assert.ok(DEFAULTS.session.turnMarks.length > 0 && DEFAULTS.session.turnMarks[0] > 0);
   assert.ok(DEFAULTS.session.costFloor > 0);
   assert.ok(DEFAULTS.cache.minTurns > 0 && DEFAULTS.cache.minHitRate > 0);
   assert.ok(DEFAULTS.toolErrors.minCalls > 0 && DEFAULTS.toolErrors.maxRate > 0);

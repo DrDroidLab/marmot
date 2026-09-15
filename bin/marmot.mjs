@@ -51,9 +51,11 @@ if (has("help") || cmd === "help") {
     config set k=v    Change a threshold without opening an editor
     mcp-audit         Ask each configured MCP server for its tools, and measure
                       what their definitions cost on every request
-    remind            Show or set when a nudge fires: --at 50,75,90, --cap 100
+    remind            Reminders: limits --at 50,75,90 (per --window), long sessions
+                      --turns 10,15,20, and --reset for the defaults
     test-notification Send one, and say what it did and where to look
     logs              What the hooks did and why, newest first. --tail, --json
+    notifications     Every notification you were shown, and what it said. --json
     doctor            What is readable on this machine, and what is not
 
   Flags
@@ -175,6 +177,22 @@ if (cmd === "init") {
         process.exit(1);
       }
     }
+  }
+
+  // Say what the hooks will now tell you about, because on a subscription that
+  // is Claude's own limits and nothing else — worth knowing before the first one.
+  if (has("hooks") && !has("remove") && !has("dry-run")) {
+    const { readPlan, enforcesLimits } = await import("../src/plan.mjs");
+    const { limitSteps, turnMarks } = await import("../src/rules.mjs");
+    const p = readPlan(ROOT);
+    const marks = limitSteps(loadConfig(ROOT), p.plan).map((n) => `${n}%`).join(", ") || "no marks";
+    process.stdout.write(
+      enforcesLimits(p.plan)
+        ? `\n  On ${p.plan} you will hear when Claude's own limits — the 5-hour window and the week —\n  reach ${marks}. Change that with ${dim("marmot remind --at 50,75,90")} or per window with\n  ${dim("marmot remind --window session --at 90")}.\n`
+        : `\n  Limit reminders at ${marks}; dollar caps apply on ${p.plan ?? "a plan Marmot could not identify"}. ${dim("marmot remind")} shows both.\n`,
+    );
+    const turns = turnMarks(loadConfig(ROOT));
+    if (turns.length) process.stdout.write(`  On any plan, you will also hear when one session reaches ${turns.join(", ")} prompts. ${dim("marmot remind --turns 10,15,20")}\n`);
   }
 
   if (has("statusline")) {
@@ -494,13 +512,14 @@ async function runBrowse() {
 }
 
 if (cmd === "remind" || cmd === "reminders") {
-  const { readPlan, usableLimits } = await import("../src/plan.mjs");
-  const { limitSteps } = await import("../src/rules.mjs");
-  const plan = has("demo") ? { plan: "Max 20×", limits: [] } : readPlan(ROOT);
-  const hasQuota = usableLimits(plan).length > 0 || (plan.plan && !["API", null].includes(plan.plan) && plan.limits.length > 0);
+  const { usableLimits, enforcesLimits, dollarCapsApply } = await import("../src/plan.mjs");
+  const { limitSteps, turnMarks } = await import("../src/rules.mjs");
+  const { hookWiring, hooksMissing } = await import("../src/hooklog.mjs");
+  const plan = has("demo") ? { plan: "Max 20×", limits: [] } : await readPlanFresh();
 
+  const readBody = () => (existsSync(cfg._path) ? JSON.parse(readFileSync(cfg._path, "utf8")) : (() => { const { _path, _exists, ...d } = { ...DEFAULTS }; return d; })());
   const write = (patch) => {
-    const body = existsSync(cfg._path) ? JSON.parse(readFileSync(cfg._path, "utf8")) : (() => { const { _path, _exists, ...d } = { ...DEFAULTS }; return d; })();
+    const body = readBody();
     for (const [path, value] of Object.entries(patch)) {
       const keys = path.startsWith("limits.byPlan.") ? ["limits", "byPlan", path.slice("limits.byPlan.".length)] : path.split(".");
       let node = body;
@@ -514,23 +533,71 @@ if (cmd === "remind" || cmd === "reminders") {
     return body;
   };
 
-  // `--at 50,75,90` sets the quota marks; `--cap 100` the dollar ceiling for a
-  // plan that exposes no quota to measure against.
+  // Claude's windows, by the names people actually type for them.
+  const WINDOWS = { session: "session", "5h": "session", "5-hour": "session", weekly: "weekly_all", week: "weekly_all", "weekly-model": "weekly_scoped", model: "weekly_scoped" };
+  const windowArg = flag("window", null);
+  const windowKind = windowArg === null ? null : WINDOWS[String(windowArg).toLowerCase()];
+  if (windowArg !== null && !windowKind) {
+    process.stderr.write("marmot remind --window takes session, weekly or weekly-model\n");
+    process.exit(1);
+  }
+
+  // `--at 50,75,90` sets the limit marks — for every window, or one with
+  // `--window`; `--cap 100` the dollar ceiling for Enterprise and API.
   const at = flag("at", null);
   const cap = flag("cap", null);
+  // `--turns 10,15,20`: prompts in one session at which to say so, on any plan.
+  const turns = flag("turns", null);
+  if (windowKind && at === null && !has("reset")) {
+    process.stderr.write("marmot remind --window needs --at or --reset, e.g. --window session --at 90\n");
+    process.exit(1);
+  }
+
+  // Back to the defaults: for one window, or every mark you have set.
+  if (has("reset")) {
+    const body = readBody();
+    if (body.limits) {
+      if (windowKind) {
+        if (body.limits.byWindow) delete body.limits.byWindow[windowKind];
+      } else {
+        delete body.limits.steps;
+        delete body.limits.byPlan;
+        delete body.limits.byWindow;
+      }
+    }
+    // Without a window, the session-length marks go back to 10, 15, 20 too.
+    if (!windowKind && body.session) delete body.session.turnMarks;
+    writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
+  }
+
   const changed = {};
   if (at !== null) {
-    const steps = String(at).split(",").map((n) => Number(n.trim())).filter((n) => Number.isFinite(n) && n > 0 && n <= 100).sort((a, b) => a - b);
-    if (!steps.length) {
-      process.stderr.write("marmot remind --at takes percentages, e.g. --at 50,75,90\n");
+    const none = String(at).toLowerCase() === "none";
+    const steps = none ? [] : String(at).split(",").map((n) => Number(n.trim())).filter((n) => Number.isFinite(n) && n > 0 && n <= 100).sort((a, b) => a - b);
+    if (!steps.length && !none) {
+      process.stderr.write("marmot remind --at takes percentages, e.g. --at 50,75,90 (or none, to silence)\n");
       process.exit(1);
     }
-    // Both, deliberately: `byPlan` takes precedence over `steps`, so setting
-    // only the shared default would silently do nothing on a plan that has an
-    // entry — which is every plan we recognise.
-    changed["limits.steps"] = steps;
-    if (plan.plan) changed[`limits.byPlan.${plan.plan}`] = steps;
+    if (windowKind) {
+      // One window, ahead of the plan's marks.
+      changed[`limits.byWindow.${windowKind}`] = steps;
+    } else {
+      // Both, deliberately: `byPlan` takes precedence over `steps`, so setting
+      // only the shared default would silently do nothing on a plan that has an
+      // entry — which is every plan we recognise.
+      changed["limits.steps"] = steps;
+      if (plan.plan) changed[`limits.byPlan.${plan.plan}`] = steps;
+    }
     changed["limits.enabled"] = true;
+  }
+  if (turns !== null) {
+    const none = String(turns).toLowerCase() === "none";
+    const marks = none ? [] : String(turns).split(",").map((n) => Number(n.trim())).filter((n) => Number.isInteger(n) && n > 0);
+    if (!marks.length && !none) {
+      process.stderr.write("marmot remind --turns takes prompt counts, e.g. --turns 10,15,20 (or none, to silence)\n");
+      process.exit(1);
+    }
+    changed["session.turnMarks"] = [...new Set(marks)].sort((a, b) => a - b);
   }
   if (cap !== null) {
     const n = Number(cap);
@@ -546,22 +613,58 @@ if (cmd === "remind" || cmd === "reminders") {
   if (Object.keys(changed).length) write(changed);
 
   const now = loadConfig(ROOT);
-  const steps = limitSteps(now, plan.plan);
+  const onLimits = enforcesLimits(plan.plan);
+  const readings = new Map(usableLimits(plan).map((l) => [{ five_hour: "session", seven_day: "weekly_all" }[l.kind] ?? l.kind, l]));
+  const marks = (kind) => {
+    const s = limitSteps(now, plan.plan, kind);
+    return s.length ? s.map((n) => `${n}%`).join(", ") : "silenced";
+  };
+  const ownWindow = (kind) => Boolean(now.limits?.byWindow && Object.prototype.hasOwnProperty.call(now.limits.byWindow, kind));
+
   process.stdout.write(`\n  ${bold("Reminders")}${plan.plan ? dim(` · ${plan.plan}`) : ""}\n\n`);
   if (!now.limits?.enabled) {
-    process.stdout.write(`  Off. ${dim("marmot remind --on")}\n`);
-  } else if (hasQuota) {
-    process.stdout.write(`  At ${bold(steps.length ? steps.map((n) => `${n}%`).join(", ") : "no marks set")} of each plan window — the 5-hour one and the week.\n`);
-    process.stdout.write(dim(`  Your plan reports quota, so these are what run out. Dollar caps stay quiet.\n`));
-  } else {
-    process.stdout.write(`  Your plan reports no quota, so the ceiling is money: ${bold(usd(now.daily.costCap))} a day, ${bold(usd(now.session.costCap))} a session.\n`);
-    process.stdout.write(dim(`  Change it with --cap.\n`));
+    process.stdout.write(`  Limit reminders are off. ${dim("marmot remind --on")}\n`);
+  } else if (onLimits || readings.size) {
+    process.stdout.write(onLimits ? `  Claude enforces these limits on your plan. You hear as each one reaches a mark:\n\n` : `  Your plan reports these limits. You hear as each one reaches a mark:\n\n`);
+    const kinds = ["session", "weekly_all", ...(readings.has("weekly_scoped") ? ["weekly_scoped"] : [])];
+    const names = { session: "5-hour session", weekly_all: "Weekly", weekly_scoped: `Weekly · ${readings.get("weekly_scoped")?.label?.replace(/^weekly · /, "") ?? "one model"}` };
+    const w = Math.max(...kinds.map((k) => names[k].length));
+    for (const kind of kinds) {
+      const r = readings.get(kind);
+      const reading = r ? `now ${r.percent}%${r.resetsAt ? `, resets in ${mins((Date.parse(r.resetsAt) - Date.now()) / 60_000)}` : ""}` : "no reading yet";
+      process.stdout.write(`    ${names[kind].padEnd(w)}   ${bold(marks(kind).padEnd(14))} ${dim(reading)}${ownWindow(kind) ? dim(" · set for this window") : ""}\n`);
+    }
+    process.stdout.write(dim(`\n  There is no daily limit: Claude's windows are five hours and a week.\n`));
   }
-  process.stdout.write(`  At most one interruption every ${bold(`${now.interrupt?.minGapMins ?? 20} minutes`)}; the rest wait for the digest.\n`);
+
+  if (dollarCapsApply(plan)) {
+    process.stdout.write(`  Dollar caps: ${bold(usd(now.daily.costCap))} a day, ${bold(usd(now.session.costCap))} a session — the spend is real on ${plan.plan ?? "a plan Marmot could not identify"}. ${dim("--cap")}\n`);
+  } else {
+    process.stdout.write(dim(`  Dollar caps stay quiet: the plan is paid for, so allowance is what runs out.\n`));
+  }
+
+  // Session length speaks on every plan, compacted or not.
+  const turnList = turnMarks(now);
+  process.stdout.write(`  Long sessions: ${bold(turnList.length ? `${turnList.join(", ")} prompts` : "silenced")} in one session, on every plan, compacted or not. ${dim("--turns")}\n`);
+
+  // Everything that would stop a reminder you just set from ever arriving.
+  const notes = [];
+  if (now.limits?.enabled && onLimits && !readings.size) notes.push(`No limit reading yet. The hooks ask Claude Code for one as they run (${dim("claude -p /usage")}, no tokens).`);
+  if (now.limits?.enabled && ["session", "weekly_all"].some((k) => marks(k) !== DEFAULTS.limits.steps.map((n) => `${n}%`).join(", "))) notes.push(`Your marks differ from the default 50%, 75%, 90%. ${dim("marmot remind --reset")} restores them.`);
+  if (now.limits?.enabled && !(now.live ?? []).includes("limit-reached")) notes.push(`limit-reached is not in ${dim("live")}, so these wait for the daily digest instead of interrupting.`);
+  if (turnList.join() !== DEFAULTS.session.turnMarks.join()) notes.push(`Your session-length marks differ from the default 10, 15, 20. ${dim("marmot remind --reset")} restores them.`);
+  if (turnList.length && !(now.live ?? []).includes("session-turns")) notes.push(`session-turns is not in ${dim("live")}, so long sessions wait for the daily digest instead of interrupting.`);
+  if (!has("demo") && hooksMissing(hookWiring(ROOT)).includes("Stop")) notes.push(`The Stop hook is not installed, so nothing will interrupt you. ${dim("marmot init --hooks")}`);
+  if (notes.length) process.stdout.write(`\n${notes.map((n) => `  ${warn("!")} ${n}`).join("\n")}\n`);
+
+  process.stdout.write(`\n  At most one interruption every ${bold(`${now.interrupt?.minGapMins ?? 20} minutes`)}; the rest wait for the digest.\n`);
   process.stdout.write(`
-  ${dim("marmot remind --at 50,75,90")}   quota marks, as percentages
-  ${dim("marmot remind --cap 100")}       dollar ceiling, for plans without quota
-  ${dim("marmot remind --off")}           stop them
+  ${dim("marmot remind --at 50,75,90")}                 every window
+  ${dim("marmot remind --window session --at 90")}      one window: session, weekly, weekly-model
+  ${dim("marmot remind --turns 10,15,20")}              long-session marks, every plan
+  ${dim("marmot remind --reset")}                       back to the defaults
+  ${dim("marmot remind --cap 100")}                     dollar ceiling, Enterprise and API only
+  ${dim("marmot remind --off")}                         stop limit reminders
 
 `);
   process.exit(0);
@@ -582,15 +685,15 @@ if (cmd === "test-notification" || cmd === "test-notif") {
 
   // The same call a real nudge makes, with the same config — a test that took a
   // different path would prove nothing about the thing being tested.
-  const did = alert(cfg, {
-    title: urgent ? "Marmot · 90% of your weekly limit" : "Marmot · Session past the cost cap",
-    body: urgent
-      ? "90% of your weekly limit is gone on Claude Max 20x. It resets in 2.1h. 42% of this window ran on subagents.\n\nStart a fresh session rather than carrying context you have finished with."
-      : "This session has reached $82.50 against a $25.00 cap, over 60 model turns.",
-    urgent,
-    kind,
-    style: forced,
-  });
+  const title = urgent ? "Marmot · 90% of your weekly limit" : "Marmot · Session past the cost cap";
+  const body = urgent
+    ? "90% of your weekly limit is gone on Claude Max 20x. It resets in 2.1h. 42% of this window ran on subagents.\n\nStart a fresh session rather than carrying context you have finished with."
+    : "This session has reached $82.50 against a $25.00 cap, over 60 model turns.";
+  const did = alert(cfg, { title, body, urgent, kind, style: forced });
+  // Catalogued like a real one, marked as a test: "I ran test-notification at
+  // 10:02 and saw nothing" is exactly the report the catalog is for.
+  const { record, delivery } = await import("../src/notifications.mjs");
+  record(ROOT, { kind: "test", previewing: kind, title, body, urgent, delivery: delivery(did, { transcript: false }) }, { cfg });
 
   process.stdout.write(`\n  ${bold("Sent a test notification.")} It is the same call a real nudge makes.\n\n`);
   const rows = [
@@ -703,7 +806,69 @@ if (cmd === "logs") {
   }
 
   process.stdout.write(`  ${dim("marmot logs --json > marmot-hooks.jsonl")}   attach this to a bug report\n`);
-  process.stdout.write(`  ${dim("marmot logs --all")}                        every run kept\n\n`);
+  process.stdout.write(`  ${dim("marmot logs --all")}                        every run kept\n`);
+  process.stdout.write(`  ${dim("marmot notifications")}                     what those runs actually showed you\n\n`);
+  process.exit(0);
+}
+
+if (cmd === "notifications" || cmd === "notifs") {
+  const { readCatalog, recording } = await import("../src/notifications.mjs");
+  const limit = argv.includes("--all") ? 0 : posInt(flag("tail"), 20);
+  const cat = readCatalog(ROOT, { limit });
+
+  if (argv.includes("--path")) {
+    process.stdout.write(`${cat.path}\n`);
+    process.exit(0);
+  }
+  // Raw JSONL, oldest first, like `logs --json`: for jq, or a bug report.
+  if (argv.includes("--json")) {
+    for (const e of [...cat.entries].reverse()) process.stdout.write(`${JSON.stringify(e)}\n`);
+    process.exit(0);
+  }
+
+  if (!cat.exists) {
+    process.stdout.write(`\n  No notifications recorded at ${bold(cat.path)} yet.\n`);
+    process.stdout.write(
+      recording(cfg)
+        ? `  One is written each time Marmot shows you something: a nudge, the daily digest,\n  or a test. None yet usually means nothing has reached a mark — ${dim("marmot logs")}\n  says what the hooks decided on each run.\n\n`
+        : `  Recording is off (${dim("log.notifications")} is false, or MARMOT_NO_LOG is set).\n\n`,
+    );
+    process.exit(0);
+  }
+
+  process.stdout.write(`\n  ${bold(`Notifications · ${num(cat.total)} shown`)}  ${dim(cat.path)}\n`);
+  // Said once, because it is the trap: the OS accepting a notification is not
+  // the notification appearing.
+  process.stdout.write(dim(`  "sent" means handed to the desktop, not seen — Focus and Do Not Disturb drop them silently.\n`));
+  if (cat.skipped) process.stdout.write(dim(`  ${cat.skipped} unreadable line${cat.skipped === 1 ? "" : "s"} skipped.\n`));
+  process.stdout.write("\n");
+
+  for (const e of cat.entries) {
+    const when = (e.at ?? "").slice(0, 19).replace("T", " ");
+    process.stdout.write(`  ${dim(when)}  ${dim((e.kind ?? "?").padEnd(6))} ${bold(e.title ?? "Marmot")}\n`);
+    // What the desktop said; where nothing went to the desktop, the transcript line.
+    for (const line of String(e.body ?? e.message ?? "").split("\n")) {
+      if (line.trim()) process.stdout.write(`    ${line.trim()}\n`);
+    }
+    const d = e.delivery ?? {};
+    const where = d.silenced
+      ? warn("muted — MARMOT_NO_NOTIFY or CI was set")
+      : d.desktop
+        ? `${d.style === "alert" ? "dialog" : d.style ?? "desktop"} via ${d.desktop}`
+        : dim("no desktop notification");
+    process.stdout.write(`    ${dim("sent")}     ${where}${d.bell ? dim(` · bell ${d.bell}`) : ""}${d.transcript ? dim(" · transcript") : ""}\n`);
+    if (e.rules?.length) process.stdout.write(`    ${dim("rules")}    ${e.rules.map((r) => (typeof r === "string" ? r : r.id)).join(", ")}\n`);
+    if (e.heldBack?.length) process.stdout.write(`    ${dim("held")}     ${e.heldBack.join(", ")}\n`);
+    if (e.session) process.stdout.write(`    ${dim("session")}  ${e.session.slice(0, 8)}${e.cost === undefined ? "" : ` · ${usd(e.cost)}`}${e.cwd ? ` · ${e.cwd}` : ""}\n`);
+    if (e.plan) {
+      const limits = e.plan.limits?.length ? e.plan.limits.map(([k, v]) => `${k} ${v}%`).join(", ") : "no limit reading";
+      process.stdout.write(`    ${dim("plan")}     ${e.plan.name ?? "could not identify"} · ${limits}\n`);
+    }
+    process.stdout.write("\n");
+  }
+
+  process.stdout.write(`  ${dim("marmot notifications --json > marmot-notifications.jsonl")}   attach this to a bug report\n`);
+  process.stdout.write(`  ${dim("marmot logs")}                                              why each hook run did or did not notify\n\n`);
   process.exit(0);
 }
 
@@ -870,6 +1035,13 @@ if (cmd === "doctor") {
     return `${num(l.total)} recorded, last ${last?.at?.slice(0, 19).replace("T", " ") ?? "?"} — \`marmot logs\``;
   })();
 
+  const { readCatalog } = await import("../src/notifications.mjs");
+  const shown = (() => {
+    const c = readCatalog(ROOT, { limit: 1 });
+    if (!c.exists) return "none recorded yet — `marmot notifications`";
+    return `${num(c.total)} recorded, last ${c.entries[0]?.at?.slice(0, 19).replace("T", " ") ?? "?"} — \`marmot notifications\``;
+  })();
+
   process.stdout.write(`
   Root            ${ROOT}
   Plan            ${(await import("../src/plan.mjs")).readPlan(ROOT).plan ?? "not detected — dollar figures are modelled at API rates"}
@@ -880,6 +1052,7 @@ if (cmd === "doctor") {
   Sessions with 0 typed prompts  ${noPrompts}${noPrompts ? "  (resumed or agent-driven; not a fault)" : ""}
   Nudge hooks     ${hooks}
   Hook runs       ${hookRuns}
+  Shown to you    ${shown}
   Notifications   ${notify}${persistNote}${d.channel === "macos" ? `\n                  If none arrive: check Focus is off, then allow notifications for\n                  that app in System Settings. notify.app posts as a different one.` : ""}
 
   Not readable here: lines added/removed (needs the diff), agent-active vs your
