@@ -5,17 +5,13 @@ nudges, with a settings window. The app is a thin SwiftUI shell over Marmot's
 Node engine, which ships inside the bundle — every number and every rule comes
 from the same code as the CLI.
 
-Requires macOS 14+ and Node.js 18+ on the machine.
+Requires macOS 14+. Node (v24 LTS) ships inside the app, so nothing else needs
+installing.
 
 ## Build and run from source
 
-```bash
-cd macos
-swift build -c release
-MARMOT_ENGINE="$PWD/../bin/marmot.mjs" .build/release/Marmot   # dev run, no notifications
-```
-
-Notifications need a real `.app` bundle, so package it to try them:
+The usual way: package it and open the result. Needs only Apple's Command Line
+Tools (`xcode-select --install`).
 
 ```bash
 macos/scripts/package.sh            # VERSION=0.2.0 by default
@@ -24,7 +20,18 @@ open macos/dist/Marmot.app          # or: cp -R macos/dist/Marmot.app /Applicati
 
 `package.sh` writes `dist/Marmot.app`, `dist/Marmot-<version>.zip`,
 `dist/Marmot-<version>.dmg` and `dist/marmot.rb` (the cask, with the zip's
-sha256 filled in).
+sha256 filled in). The first run downloads the official Node binary (checksum
+verified) and caches it in `.build/node-cache`; later builds reuse it.
+
+A quicker dev run skips the bundle. It has no Node of its own, so it needs Node
+18+ on your `PATH` (or `MARMOT_NODE`), and notifications do not work outside an
+`.app`:
+
+```bash
+cd macos
+swift build -c release
+MARMOT_ENGINE="$PWD/../bin/marmot.mjs" .build/release/Marmot
+```
 
 ## Install with Homebrew
 
@@ -32,10 +39,10 @@ sha256 filled in).
 brew install --cask drdroidlab/tap/marmot
 ```
 
-The cask installs `Marmot.app`, links the `marmot` CLI from the bundle, and
-depends on the `node` formula. The app is ad-hoc signed for now, so the cask
-clears the quarantine flag; a DMG download needs System Settings → Privacy &
-Security → Open Anyway once.
+The cask installs `Marmot.app`, with Node inside it, and links the `marmot` CLI
+from the bundle. It needs no `node` formula. The app is ad-hoc signed for now,
+so the cask clears the quarantine flag; a DMG download needs System Settings →
+Privacy & Security → Open Anyway once.
 
 ## Releasing
 
