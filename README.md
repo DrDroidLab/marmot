@@ -58,9 +58,10 @@ the clock. Its Settings window edits the same `~/.claude/marmot.json` the CLI
 does, so every threshold below has a control.
 
 While the app is running, the hooks hand their nudges to it instead of opening
-a dialog, and it also checks your limits between turns. It needs Node 18+ (the
-cask installs it) and ships its own copy of the CLI, linked as `marmot`. Build
-it yourself with `macos/scripts/package.sh`; see [`macos/README.md`](macos/README.md).
+a dialog, and it also checks your limits between turns. Node ships inside the
+app, so a Mac without Node needs nothing else, and so does its own copy of the
+CLI, linked as `marmot`. Build it yourself with `macos/scripts/package.sh`; see
+[`macos/README.md`](macos/README.md).
 
 ## What a nudge looks like
 
