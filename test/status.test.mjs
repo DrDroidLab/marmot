@@ -135,11 +135,11 @@ test("an old heartbeat, or MARMOT_NO_APP, means no app", (t) => {
   assert.equal(appAlive(root, { env: {} }), true);
 });
 
-const stop = (root, transcript) =>
+const stop = (root, transcript, env = ENV) =>
   execFileSync(process.execPath, [HOOK], {
     input: JSON.stringify({ hook_event_name: "Stop", transcript_path: transcript }),
     encoding: "utf8",
-    env: { ...ENV, MARMOT_ROOT: root },
+    env: { ...env, MARMOT_ROOT: root, MARMOT_NO_REFRESH: "1" },
   });
 
 test("the Stop hook hands its nudge to a running app instead of a dialog", (t) => {
@@ -148,7 +148,10 @@ test("the Stop hook hands its nudge to a running app instead of a dialog", (t) =
   const transcript = costlySession(root);
   writeHeartbeat(root);
 
-  stop(root, transcript);
+  // Not silenced, or there is nothing to hand over. The fresh heartbeat is what
+  // keeps this from opening a real dialog: the nudge goes to the inbox instead.
+  const { MARMOT_NO_NOTIFY, CI, ...loud } = ENV;
+  stop(root, transcript, loud);
   const queued = readFileSync(inboxPath(root), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(queued.length, 1);
   assert.match(queued[0].title, /cost cap/);

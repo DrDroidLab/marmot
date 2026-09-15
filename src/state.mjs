@@ -21,7 +21,10 @@ export function readState(root) {
   if (!existsSync(p)) return { digestShownOn: null, fired: {}, lastNudgeAt: null };
   try {
     const s = JSON.parse(readFileSync(p, "utf8"));
-    return { digestShownOn: s.digestShownOn ?? null, fired: s.fired ?? {}, lastNudgeAt: s.lastNudgeAt ?? null };
+    // Everything else is carried through. The hook keeps its own fields here —
+    // the daily cache, when it last asked for a limit refresh — and dropping
+    // them on read meant the throttle behind each one never held.
+    return { ...s, digestShownOn: s.digestShownOn ?? null, fired: s.fired ?? {}, lastNudgeAt: s.lastNudgeAt ?? null };
   } catch {
     return { digestShownOn: null, fired: {}, lastNudgeAt: null };
   }

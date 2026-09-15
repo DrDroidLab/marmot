@@ -99,8 +99,9 @@ one 42MB transcript — and dropping them is what turns a 41MB transcript into a
 | `src/config.mjs` | Defaults + `~/.claude/marmot.json`. |
 | `src/state.mjs` | Dedupe: what has already been said. |
 | `src/hooklog.mjs` | What the hooks did and why, plus where they are installed. |
+| `src/notifications.mjs` | The catalog: every notification shown, in its own words. |
 | `src/status.mjs` | The menu bar app's payloads: `status` (everything it shows) and `tick` (nudges to post between turns, sharing `state.mjs` with the hooks). |
-| `src/inbox.mjs` | App heartbeat + inbox. A hook hands its nudge to a running app instead of a dialog. |
+| `src/inbox.mjs` | App heartbeat + inbox. `alert()` hands a notification to a running menu bar app instead of a dialog. |
 | `macos/` | The Swift menu bar app. Draws what `status` returns and never re-implements a rule; `macos/scripts/package.sh` builds the .app with this engine inside it. |
 | `src/render.mjs` | Terminal output. |
 | `src/html.mjs` | The self-contained browser page (one template function). |
@@ -176,12 +177,30 @@ behind — an entry that reads correctly and silently never runs.
 When adding an early `process.exit(0)` to the hook, set `trace.outcome` first.
 The runs worth explaining are exactly the ones where nothing appeared.
 
+`src/notifications.mjs` is the other half: `~/.claude/marmot-notifications.jsonl`
+gets one line per notification actually shown — nudge, digest or test — with
+the desktop title and body, the transcript line, the rules, the plan and the
+delivery channel. The log says *why*; the catalog says *what you saw*. Any new
+path that shows the user something should `record()` it.
+
+**Dollar caps never speak on Pro, Max or Team** — `dollarCapsApply()` in
+`plan.mjs`. It used to treat an empty or stale limit snapshot as "no quota" and
+fall back to dollars, which put ten "cost cap" nudges in front of a Max
+subscriber in a week, *after* the missing-`plan` bug above was fixed. A missing
+reading on a subscription is refreshed (in the background, from the Stop hook,
+throttled), never replaced with a number that does not apply.
+
+`readState()` passes unknown fields through. It used to rebuild the object from
+three known keys, which silently dropped `dailyCache` on every read — so the
+throttle it existed for never held. Anything the hook keeps in state relies on
+this.
+
 ## Rules and diagnoses
 
 Two kinds of thing, and the distinction is the whole design:
 
 - A **rule** decides *whether to interrupt you* — a budget crossing a mark, a
-  day unlike your own normal. There are six, and they are in `rules.mjs`.
+  day unlike your own normal. There are seven, and they are in `rules.mjs`.
 - A **diagnosis** explains *why*, in one quantified sentence, and never fires on
   its own. They are in `diagnose.mjs`, scored by `share × confidence ×
   leverage`, and the highest-scoring one becomes the middle sentence of whatever
@@ -202,7 +221,15 @@ three guards:
 - a **dollar floor** — nothing about a session too small to care about
 
 Without all three, the same checks fired on nearly every session in testing. A
-nudge that always fires gets muted, and then none of them work. Add the default
+nudge that always fires gets muted, and then none of them work.
+
+`session-turns` is the one deliberate exception: it has no dollar floor, because
+it speaks on every plan and on a subscription the dollars are not the point. Its
+marks (`session.turnMarks`, default 10/15/20 typed prompts) are the sample guard,
+each speaks once per session, and it ignores compaction on purpose. A rule with
+marks returns a `key` per mark and its own `label`; the hook dedupes on the key.
+When several fire in one Stop, the hook shows limits first, then money, then
+session length. Add the default
 to `DEFAULTS` in `config.mjs` and a row to the README table.
 
 Rules in `cfg.live` may interrupt mid-session; everything else waits for the daily
@@ -344,7 +371,7 @@ claude plugin details marmot                  # Skills (2), Hooks (2)
 ## Verifying a change
 
 ```bash
-npm test        # 356 tests, node:test, no dependencies
+npm test        # 384 tests, node:test, no dependencies
 ```
 
 The suite encodes the drill that used to be manual, so most of it is covered:
@@ -359,6 +386,10 @@ The suite encodes the drill that used to be manual, so most of it is covered:
 | `test/cli.test.mjs` | Every command runs; `--no-text` redacts; the page is self-contained. |
 | `test/hook.test.mjs` | Stop and SessionStart, driven over stdin as Claude Code drives them — including **the context the hook builds**, not just the rules given a correct one. |
 | `test/hooklog.test.mjs` | The trace log, and finding hooks in every settings scope. |
+| `test/limits.test.mjs` | Which ceiling speaks on which plan; per-window marks; the background refresh. |
+| `test/catalog.test.mjs` | Every shown notification is catalogued, through the real hook and CLI. |
+| `test/remind.test.mjs` | `marmot remind`: per-window marks, `--turns`, `--reset`, what it says per plan. |
+| `test/turns.test.mjs` | `session-turns`: marks, every plan, compacted or not, once per mark through the hook. |
 | `test/notify.test.mjs` | Banner vs dialog, per kind; every icon is published; no real popup or bell. |
 | `test/mcp.test.mjs` | The audit protocol, against a real stdio server it starts itself. |
 

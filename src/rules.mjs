@@ -12,7 +12,7 @@
 
 import { configuredServers, byDay } from "./sessions.mjs";
 import { usd, pct, num, tokens, mins } from "./format.mjs";
-import { paysPerToken, usableLimits, limitPace } from "./plan.mjs";
+import { usableLimits, limitPace, dollarCapsApply } from "./plan.mjs";
 import { bestDiagnosis } from "./diagnose.mjs";
 
 const premiumCost = (s, cfg) =>
@@ -33,22 +33,6 @@ const isLightPath = (p, cfg) => {
   if (segments.slice(0, -1).some((seg) => cfg.models.lightWorkDirs.includes(seg))) return true;
   return cfg.models.lightWorkFilePatterns.some((rx) => new RegExp(rx).test(base));
 };
-
-/**
- * Whether a dollar cap is the right ceiling for this plan.
- *
- * Three cases, and the middle one is the reason this is not a one-liner:
- *
- *   - **Pay-as-you-go**, or a plan we could not identify: the figure is the
- *     bill, so a dollar cap is exactly right.
- *   - **A plan with quota** — Pro, Max, most Team seats: the money is already
- *     spent, and "$511 today against a $50 cap" is a Tuesday. The quota is the
- *     real ceiling, so dollars stay quiet.
- *   - **A plan without quota**, which is where Enterprise usually lands: no
- *     percentages to work with, so a dollar cap is the only ceiling available.
- *     Silence here would mean no budget at all.
- */
-const dollarsAreBilled = (plan) => !plan?.plan || paysPerToken(plan.plan) || usableLimits(plan).length === 0;
 
 /**
  * The areas of the tree a session worked in, oldest first.
@@ -98,17 +82,28 @@ export function areasOf(s, cfg) {
   return [...groups.values()].sort((a, b) => a.firstTurn - b.firstTurn);
 }
 
+/** The older snapshot shape names the same two windows differently. */
+const WINDOW_ALIAS = { five_hour: "session", seven_day: "weekly_all" };
+
 /**
- * The marks to speak at, for this plan. Per-plan first, then the shared
- * default, and always sorted so "the highest one passed" means what it says.
+ * The marks to speak at, for this plan and window. Per-window first, then
+ * per-plan, then the shared default, and always sorted so "the highest one
+ * passed" means what it says.
  */
-export function limitSteps(cfg, plan) {
-  const byPlan = cfg.limits?.byPlan ?? {};
-  const chosen = plan && Object.prototype.hasOwnProperty.call(byPlan, plan) ? byPlan[plan] : cfg.limits?.steps;
+export function limitSteps(cfg, plan, kind = null) {
+  const own = (table, key) => key && table && Object.prototype.hasOwnProperty.call(table, key);
+  const byWindow = cfg.limits?.byWindow;
+  const byPlan = cfg.limits?.byPlan;
+  const w = WINDOW_ALIAS[kind] ?? kind;
+  const chosen = own(byWindow, w) ? byWindow[w] : own(byPlan, plan) ? byPlan[plan] : cfg.limits?.steps;
   return (Array.isArray(chosen) ? chosen : [])
     .filter((n) => typeof n === "number" && n > 0)
     .sort((a, b) => a - b);
 }
+
+/** The session-length marks, sorted and cleaned, so a typo costs a mark rather than the rule. */
+export const turnMarks = (cfg) =>
+  [...new Set((cfg.session?.turnMarks ?? []).filter((n) => typeof n === "number" && Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
 
 /** "in 2.1h", or "shortly", without pretending to more precision than we have. */
 function resetWording(iso) {
@@ -134,7 +129,7 @@ export const sessionRules = [
     id: "session-cost",
     label: "Session past the cost cap",
     check(s, cfg, ctx = {}) {
-      if (!dollarsAreBilled(ctx.plan)) return null;
+      if (!dollarCapsApply(ctx.plan)) return null;
       if (s.cost <= cfg.session.costCap) return null;
       return {
         detail: `This session has reached ${usd(s.cost)} against a ${usd(cfg.session.costCap)} cap, over ${s.assistantTurns} model turns.`,
@@ -169,6 +164,28 @@ export const sessionRules = [
       };
     },
   },
+  {
+    id: "session-turns",
+    label: "Long session",
+    // Every plan, and compacted or not. A long session costs allowance on a
+    // subscription and money on the API alike, and compacting trims what it
+    // carries without making it a new session. No dollar floor, deliberately:
+    // on a subscription the dollars are not the point, and the marks — prompts
+    // you typed, each speaking once — are the sample guard.
+    check(s, cfg) {
+      const crossed = turnMarks(cfg).filter((n) => s.typedPrompts >= n).at(-1);
+      if (crossed === undefined) return null;
+      const compacted = s.compactions > 0 ? `compacted ${s.compactions === 1 ? "once" : `${s.compactions} times`}` : "never compacted";
+      return {
+        // Keyed by the mark, so the next one is news and the same one is not.
+        key: `session-turns:${crossed}`,
+        label: `${crossed} prompts in this session`,
+        detail: `${num(s.typedPrompts)} prompts in this session so far, ${compacted}, over ${num(s.assistantTurns)} model turns.`,
+        action:
+          "Every earlier turn travels with each new one. If the next task is a separate one, a fresh session starts clean; if it is the same work, /compact keeps the thread and drops the weight.",
+      };
+    },
+  },
 ];
 
 /** Rules that need the whole window rather than one session. */
@@ -177,7 +194,7 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
   const days = byDay(sessions);
   const todayRow = days.find((d) => d.day === today);
 
-  if (todayRow && dollarsAreBilled(plan) && todayRow.cost > cfg.daily.costCap) {
+  if (todayRow && dollarCapsApply(plan) && todayRow.cost > cfg.daily.costCap) {
     const why = diagnose ? bestDiagnosis(diagnose, { floor: cfg.limits?.causeFloor ?? 0.08 }) : null;
     out.push({
       id: "daily-cost",
@@ -193,8 +210,10 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
 
   // Against your own trailing average rather than a fixed number, because the
   // right absolute figure differs by an order of magnitude between engineers.
+  // Dollars too, so it answers to the same plan check: on a subscription a
+  // heavy day shows up where it bites, as a limit crossing a mark.
   const prior = days.filter((d) => d.day < today).slice(-cfg.daily.baselineDays);
-  if (todayRow && prior.length >= cfg.daily.baselineMinDays && todayRow.cost >= cfg.daily.baselineMinCost) {
+  if (todayRow && dollarCapsApply(plan) && prior.length >= cfg.daily.baselineMinDays && todayRow.cost >= cfg.daily.baselineMinCost) {
     const mean = prior.reduce((a, d) => a + d.cost, 0) / prior.length;
     const sd = Math.sqrt(prior.reduce((a, d) => a + (d.cost - mean) ** 2, 0) / prior.length);
     const bound = mean + cfg.daily.baselineSigma * sd;
@@ -212,10 +231,12 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
   // Your plan's own limits. On a subscription this is the number that actually
   // bites — you have already paid the money, and what runs out is allowance.
   if (cfg.limits?.enabled && plan?.limits?.length) {
-    const steps = limitSteps(cfg, plan.plan);
     // Only windows that are still the window they were measured in. A reading
     // whose window has reset says nothing about the one you are in now.
     for (const l of usableLimits(plan)) {
+      // Per window: "only at 90% of the 5-hour window" and "at every quarter of
+      // the week" are both reasonable, and one shared list cannot say both.
+      const steps = limitSteps(cfg, plan.plan, l.kind);
       // The highest mark this window has passed. Each speaks once, so 91% says
       // "90%" rather than repeating what 76% already said.
       const crossed = steps.filter((n) => l.percent >= n).sort((a, b) => b - a)[0];
@@ -231,7 +252,9 @@ export function windowRules(sessions, cfg, { root, today = new Date().toISOStrin
         // Keyed by the mark, so crossing the next one is news and re-reading
         // the same one is not.
         key: `limit-reached:${l.kind}:${crossed}`,
-        label: `${crossed}% of your ${l.label === "weekly" ? "weekly" : "5-hour"} limit`,
+        // The window's own name. Mapping everything that was not "weekly" to
+        // "5-hour" called the per-model weekly limit a 5-hour one.
+        label: `${crossed}% of your ${l.label} limit`,
         detail:
           `${l.percent}% of your ${l.label} limit is gone${age}${plan.plan ? ` on ${plan.plan}` : ""}.${resets}` +
           (why ? ` ${why.line}` : ""),

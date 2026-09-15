@@ -24,10 +24,11 @@ import { readPlan, usableLimits, limitPace, readAttribution, paysPerToken } from
 import { evaluate, windowRules } from "./rules.mjs";
 import { allDiagnoses } from "./diagnose.mjs";
 import { totals } from "./render.mjs";
-import { readLog, append as logAppend, hookWiring, hooksMissing } from "./hooklog.mjs";
+import { readLog, append as logAppend, hookWiring, hooksMissing, planTrace } from "./hooklog.mjs";
 import { readAudit } from "./mcp.mjs";
 import { readState, writeState, shouldFire, markFired, withinQuietPeriod, markNudged } from "./state.mjs";
 import { drainInbox, writeHeartbeat } from "./inbox.mjs";
+import { record as recordShown, delivery } from "./notifications.mjs";
 import { mins } from "./format.mjs";
 
 const tokenSum = (s) => s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite;
@@ -273,6 +274,28 @@ export function tick({ root, cfg, app = false, now = Date.now() }) {
       source: "tick",
       at: new Date(now).toISOString(),
     });
+  }
+
+  // What the app is about to put on screen goes in the catalog, like every
+  // other notification. Without `app` nothing is shown, so nothing is recorded;
+  // what the hooks queued was already catalogued by the hook that queued it.
+  if (app) {
+    for (const n of notifications.filter((x) => x.source === "tick")) {
+      recordShown(
+        root,
+        {
+          kind: "nudge",
+          event: "Tick",
+          title: n.title,
+          body: n.body,
+          message: null,
+          rules: [{ id: n.key, label: n.title.replace(/^Marmot · /, ""), urgent: n.urgent }],
+          plan: planTrace(plan),
+          delivery: delivery({ style: "app", desktop: { via: "Marmot app" } }, { transcript: false }),
+        },
+        { cfg, now },
+      );
+    }
   }
 
   if (show.length && cfg.log?.hooks !== false && !process.env.MARMOT_NO_LOG) {

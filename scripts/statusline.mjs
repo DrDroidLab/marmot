@@ -14,6 +14,7 @@ import { openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } 
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadConfig } from "../src/config.mjs";
+import { readPlan, dollarCapsApply } from "../src/plan.mjs";
 import { defaultRoot } from "../src/sessions.mjs";
 
 const CACHE = join(homedir(), ".claude", "marmot-statusline.json");
@@ -79,8 +80,11 @@ const prompts = typedPrompts(d.transcript_path, d.session_id ?? "unknown");
 
 const D = "\x1b[2m", R = "\x1b[0m", Y = "\x1b[33m", B = "\x1b[1m";
 const money = cost >= 100 ? `$${Math.round(cost)}` : `$${cost.toFixed(2)}`;
-const over = cost > cfg.session.costCap;
-const manyTurns = prompts !== null && prompts > cfg.session.turnCap;
+// Money is only worth colouring where it is the ceiling: Enterprise and API.
+const over = dollarCapsApply(readPlan(defaultRoot())) && cost > cfg.session.costCap;
+// From the first session-length mark, which is where the nudges start.
+const firstMark = Math.min(...(cfg.session.turnMarks ?? []).filter((n) => n > 0));
+const manyTurns = prompts !== null && prompts >= firstMark;
 
 const parts = [];
 parts.push(`${over ? Y : ""}${B}${money}${R}`);

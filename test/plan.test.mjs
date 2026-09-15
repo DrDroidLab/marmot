@@ -519,9 +519,11 @@ test("a plan with no quota falls back to a dollar ceiling", () => {
   const noQuota = { plan: "Enterprise", ageMins: 2, limits: [] };
   assert.ok(windowRules(bigDay, DEFAULTS, opts(noQuota)).find((w) => w.id === "daily-cost"));
 
-  // And a plan whose quota reading has expired is in the same position.
+  // A subscription whose reading has expired is not in the same position: its
+  // limits still exist, they only need re-reading. Falling back to dollars here
+  // is what sent a Max subscriber ten "cost cap" nudges in a week.
   const expired = { plan: "Max 20×", ageMins: 2, limits: [{ kind: "weekly_all", label: "weekly", percent: 10, expired: true }] };
-  assert.ok(windowRules(bigDay, DEFAULTS, opts(expired)).find((w) => w.id === "daily-cost"));
+  assert.equal(windowRules(bigDay, DEFAULTS, opts(expired)).find((w) => w.id === "daily-cost"), undefined);
 
   // But while the quota is readable, the quota is the ceiling.
   assert.equal(windowRules(bigDay, DEFAULTS, opts(withQuota())).find((w) => w.id === "daily-cost"), undefined);

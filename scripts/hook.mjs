@@ -26,25 +26,11 @@ import { renderNudges } from "../src/render.mjs";
 import { readState, writeState, shouldFire, markFired, withinQuietPeriod, markNudged } from "../src/state.mjs";
 import { usd } from "../src/format.mjs";
 import { alert, notifyStyle } from "../src/notify.mjs";
-import { readPlan, refreshUsage, worthRefreshing, readAttribution } from "../src/plan.mjs";
+import { readPlan, refreshUsage, refreshUsageInBackground, worthRefreshing, readAttribution, enforcesLimits } from "../src/plan.mjs";
 import { logging, append as logAppend, planTrace } from "../src/hooklog.mjs";
-import { appAlive, appendInbox } from "../src/inbox.mjs";
+import { record as recordShown, delivery } from "../src/notifications.mjs";
 
 const THROTTLE_MS = 5 * 60 * 1000;
-
-/**
- * Hand a notification to the menu bar app when it is running, and fall back to
- * `alert()` when it is not — or when the handoff could not be written. The app
- * posts a real notification with the marmot on it, which is what a dialog was
- * standing in for. `appBody` is the full nudge: a notification always has room
- * for what to do about it.
- */
-function deliver(cfg, root, msg, appBody = msg.body) {
-  if (cfg.notify?.desktop !== false && appAlive(root) && appendInbox(root, { ...msg, body: appBody })) {
-    return { style: "app", desktop: { via: "Marmot app" }, bell: false };
-  }
-  return alert(cfg, msg);
-}
 
 const emit = (event, message) => {
   if (message && message.trim()) {
@@ -99,7 +85,7 @@ if (event === "SessionStart") {
     // hook below runs at the end of every turn and must not pay that.
     plan: (() => {
       const p = readPlan(root);
-      if (cfg.limits?.autoRefresh && p.plan && worthRefreshing(p, cfg.limits.staleAfterMins)) {
+      if (cfg.limits?.autoRefresh && !process.env.MARMOT_NO_REFRESH && p.plan && worthRefreshing(p, cfg.limits.staleAfterMins)) {
         const r = refreshUsage(root);
         if (r.refreshed) return r.plan;
       }
@@ -121,11 +107,18 @@ if (event === "SessionStart") {
     ...(nudges.sessionNudges ?? []).map((n) => ({ id: n.id, fired: true, sessions: n.hits?.length ?? 0 })),
     ...(nudges.windowNudges ?? []).map((n) => ({ id: n.key ?? n.id, fired: true })),
   ];
+  const title = "Marmot · daily digest";
+  const desktopBody = head.replace(/^Marmot · /, "");
+  let did = null;
   if (body.trim()) {
-    const did = deliver(cfg, root, { title: "Marmot · daily digest", body: head.replace(/^Marmot · /, ""), kind: "digest", id: "digest", key: `digest:${today}` });
+    did = alert(cfg, { title, body: desktopBody, kind: "digest" });
     trace.notify = { style: did.style, via: did.desktop?.via ?? did.desktop?.cmd ?? null, bell: did.bell };
   }
-  emit(event, body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`);
+  const message = body.trim() ? `${head}\n\n${body}\n\n  marmot report — the full window` : `${head}  Nothing flagged.`;
+  // Catalogued whether or not a desktop notification went out: the digest lands
+  // in your transcript either way, and that is something you were shown.
+  recordShown(root, { kind: "digest", event, title, body: did ? desktopBody : null, message, rules: trace.rules.map((r) => r.id), delivery: delivery(did) }, { cfg });
+  emit(event, message);
 }
 
 // --- Stop: live rules against the session in front of you --------------------
@@ -158,6 +151,20 @@ const lines = [];
 // where the quota is the only ceiling that means anything.
 const plan = readPlan(root);
 
+// On Pro, Max and Team the limits are the only thing that speaks, so a snapshot
+// nobody refreshes is a nudge that never comes — and Claude Code does not keep
+// it fresh on its own. Ask for one without waiting, since this runs every turn,
+// and no more than once every few minutes however stale it stays.
+const REFRESH_GAP_MS = 10 * 60 * 1000;
+if (cfg.limits?.enabled && cfg.limits?.autoRefresh && !process.env.MARMOT_NO_REFRESH && enforcesLimits(plan.plan) && worthRefreshing(plan, cfg.limits.staleAfterMins)) {
+  if (Date.now() - (state.refreshStartedAt ?? 0) < REFRESH_GAP_MS) {
+    trace.refresh = "limits stale; a refresh was already asked for recently";
+  } else {
+    state.refreshStartedAt = Date.now();
+    trace.refresh = refreshUsageInBackground() ? "limits stale; refreshing in the background for the next turn" : "limits stale; could not start a refresh";
+  }
+}
+
 trace.session = current.id;
 trace.cwd = current.cwd ?? null;
 trace.cost = Number(current.cost?.toFixed?.(2) ?? current.cost);
@@ -176,13 +183,15 @@ for (const rule of sessionRules) {
     trace.rules.push({ id: rule.id, fired: false, why: "the rule did not match" });
     continue;
   }
-  if (!shouldFire(state, current.id, rule.id, current.cost)) {
-    trace.rules.push({ id: rule.id, fired: false, why: "already said for this session, and not yet doubled" });
+  // A rule with marks keys each one, so crossing the next is news.
+  const key = hit.key ?? rule.id;
+  if (!shouldFire(state, current.id, key, current.cost)) {
+    trace.rules.push({ id: key, fired: false, why: `already said for this session${rule.id.includes("cost") ? ", and not yet doubled" : ""}` });
     continue;
   }
-  markFired(state, current.id, rule.id, current.cost);
-  trace.rules.push({ id: rule.id, fired: true });
-  lines.push({ label: rule.label, detail: hit.detail, action: hit.action, urgent: hit.urgent === true });
+  markFired(state, current.id, key, current.cost);
+  trace.rules.push({ id: key, fired: true });
+  lines.push({ id: key, label: hit.label ?? rule.label, detail: hit.detail, action: hit.action, urgent: hit.urgent === true });
 }
 
 // Today's total needs the other sessions too. They change slowly; re-read at
@@ -210,9 +219,14 @@ if (live.has("daily-cost") || live.has("daily-baseline") || live.has("limit-reac
     }
     markFired(state, today, key, todayCost);
     trace.rules.push({ id: key, fired: true });
-    lines.push({ label: w.label, detail: w.detail, action: w.action, urgent: w.urgent === true });
+    lines.push({ id: key, label: w.label, detail: w.detail, action: w.action, urgent: w.urgent === true });
   }
 }
+
+// When several have something to say, the one that can run out goes first: a
+// limit, then money, then the shape of the session. Urgent above all of them.
+const rank = (id) => (id.startsWith("limit-") ? 0 : /cost|baseline/.test(id) ? 1 : 2);
+lines.sort((a, b) => Number(b.urgent) - Number(a.urgent) || rank(a.id) - rank(b.id));
 
 if (!lines.length) {
   writeState(state, root);
@@ -235,27 +249,42 @@ const show = lines.slice(0, Math.max(1, cfg.interrupt?.maxPerNudge ?? 1));
 markNudged(state);
 writeState(state, root);
 
-const more = lines.length > 1 ? `\n\n${lines.length - 1} more in \`marmot\`.` : "";
-const did = deliver(
-  cfg,
-  root,
-  {
-    title: `Marmot · ${show[0].label}`,
-    // A banner gets the one line it has room for. A dialog has room for the whole
-    // nudge, so it carries what to do about it too — which is the half that
-    // makes it worth interrupting for.
-    body: (notifyStyle(cfg, show[0].urgent) === "alert" ? `${show[0].detail}\n\n${show[0].action}` : show[0].detail) + more,
-    urgent: show[0].urgent,
-    id: show[0].label,
-  },
-  `${show[0].detail}\n\n${show[0].action}${more}`,
-);
+const title = `Marmot · ${show[0].label}`;
+// A banner gets the one line it has room for. A dialog has room for the whole
+// nudge, so it carries what to do about it too — which is the half that makes
+// it worth interrupting for.
+const body =
+  (notifyStyle(cfg, show[0].urgent) === "alert"
+    ? `${show[0].detail}\n\n${show[0].action}`
+    : show[0].detail) + (lines.length > 1 ? `\n\n${lines.length - 1} more in \`marmot\`.` : "");
+const did = alert(cfg, { title, body, urgent: show[0].urgent });
 trace.outcome = "nudged";
 trace.nudge = show.map((l) => l.label);
 trace.notify = { style: did.style, via: did.desktop?.via ?? did.desktop?.cmd ?? null, bell: did.bell };
 
-emit(
-  event,
+const message =
   show.map((l) => `Marmot · ${l.label}\n  ${l.detail}\n  ${l.action}`).join("\n\n") +
-    (lines.length > show.length ? `\n\n  ${lines.length - show.length} more in \`marmot\` and tomorrow's digest.` : ""),
+  (lines.length > show.length ? `\n\n  ${lines.length - show.length} more in \`marmot\` and tomorrow's digest.` : "");
+
+// The words as they were shown, beside what decided them. The hook log says why
+// a rule fired; this says what reached you, and through which channel.
+recordShown(
+  root,
+  {
+    kind: "nudge",
+    event,
+    title,
+    body,
+    message,
+    rules: show.map((l) => ({ id: l.id, label: l.label, urgent: l.urgent })),
+    heldBack: lines.slice(show.length).map((l) => l.id),
+    session: current.id,
+    cwd: current.cwd ?? null,
+    cost: trace.cost,
+    plan: trace.plan,
+    delivery: delivery(did),
+  },
+  { cfg },
 );
+
+emit(event, message);

@@ -21,7 +21,7 @@
  */
 
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 /** `default_claude_max_20x` and friends, in words. */
 export function planName({ tier, orgType, billing, hasOauth }) {
@@ -49,6 +49,14 @@ export function planName({ tier, orgType, billing, hasOauth }) {
  * Only pay-as-you-go API usage bills per token.
  */
 export const paysPerToken = (plan) => plan === "API";
+
+/**
+ * Plans where Claude itself enforces the ceiling: a rolling 5-hour session
+ * window and weekly ones. The money is paid up front, so what runs out is
+ * allowance, and those limits are the only thing worth interrupting for.
+ */
+const LIMIT_PLANS = new Set(["Pro", "Max", "Max 5×", "Max 20×", "Team", "subscription"]);
+export const enforcesLimits = (plan) => LIMIT_PLANS.has(plan);
 
 const asPercent = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -160,6 +168,27 @@ export const usableLimits = (plan) =>
 export const limitsExpired = (plan) => Boolean(plan?.limits?.length) && usableLimits(plan).length === 0;
 
 /**
+ * Whether a dollar cap is a ceiling worth announcing on this plan.
+ *
+ *   - **Pro, Max, Team**: never. "$511 today against a $50 cap" is a Tuesday
+ *     on Max — the dollars are a shadow price, and Claude's own limits are the
+ *     ceiling. This holds when the limit snapshot is missing or stale, too: it
+ *     used to fall back to dollars then, and that is how a Max subscriber got
+ *     ten "cost cap" nudges in a week. A missing reading is refreshed, not
+ *     replaced with a number that does not apply.
+ *   - **Enterprise and pay-as-you-go API**: always. There the spend is real.
+ *   - **A plan we could not identify**: dollars, unless it reports limits of
+ *     its own — better to mention a cost that turns out not to be charged than
+ *     to stay silent about one that is.
+ */
+export function dollarCapsApply(plan) {
+  const name = plan?.plan ?? null;
+  if (enforcesLimits(name)) return false;
+  if (name === null) return usableLimits(plan).length === 0;
+  return true;
+}
+
+/**
  * How long each window is. Needed to turn "78% used" into "78% used with a day
  * left", which is the difference between a number and something to act on.
  */
@@ -227,7 +256,7 @@ export function refreshUsage(root, { timeoutMs = 45_000, run, now = Date.now(), 
           // Run somewhere neutral: this should not adopt the project's
           // settings, hooks or MCP servers just to read a number.
           cwd: env.TMPDIR || "/tmp",
-          env: { ...env, MARMOT_NO_NOTIFY: "1" },
+          env: { ...env, MARMOT_NO_NOTIFY: "1", MARMOT_NO_REFRESH: "1" },
         }));
     const out = exec("claude", ["-p", "/usage"]);
     // The attribution block exists only in this output, so it is saved here or
@@ -239,6 +268,30 @@ export function refreshUsage(root, { timeoutMs = 45_000, run, now = Date.now(), 
   }
   const after = readPlan(root, { now: Date.now(), env });
   return { refreshed: after.fetchedAt !== before && after.fetchedAt !== null, plan: after, attribution: readAttribution(root) };
+}
+
+/**
+ * Ask for a fresh snapshot and do not wait for it.
+ *
+ * The Stop hook runs at the end of every turn and cannot spend seconds on
+ * `claude -p /usage`, but on a subscription the limits are the only nudge left,
+ * so a snapshot nobody refreshes is a nudge that never comes. This starts the
+ * refresh detached; the next turn reads what it wrote. Never throws.
+ */
+export function refreshUsageInBackground({ env = process.env, spawnFn = spawn } = {}) {
+  try {
+    const child = spawnFn("claude", ["-p", "/usage"], {
+      detached: true,
+      stdio: "ignore",
+      cwd: env.TMPDIR || "/tmp",
+      env: { ...env, MARMOT_NO_NOTIFY: "1", MARMOT_NO_REFRESH: "1" },
+    });
+    child?.on?.("error", () => {});
+    child?.unref?.();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export const attributionPath = (root) => `${root}/marmot-usage.json`;
