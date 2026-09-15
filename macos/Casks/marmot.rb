@@ -15,14 +15,15 @@ cask "marmot" do
 
   # Ad-hoc signed until there is a Developer ID: without this, Gatekeeper
   # refuses to open a downloaded app.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Marmot.app"]
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.quarantine", "{{appdir}}/Marmot.app"],
+        must_succeed: false
   end
 
   zap trash: [
-    "~/Library/Preferences/io.drdroid.marmot.plist",
-    "~/.claude/marmot-inbox.jsonl",
     "~/.claude/marmot-app.json",
+    "~/.claude/marmot-inbox.jsonl",
+    "~/Library/Preferences/io.drdroid.marmot.plist",
   ]
 end
