@@ -189,6 +189,9 @@ export const DEFAULTS = {
       // The once-a-day summary of yesterday, at the start of a session.
       digest: "alert",
     },
+    // A plan window reaching 100%. Only the menu bar app checks for this
+    // between turns; the last configured mark has usually spoken already.
+    depleted: true,
   },
 
   // What the hooks did, and why, one JSON line per run — `marmot logs`.

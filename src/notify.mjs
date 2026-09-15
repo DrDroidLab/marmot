@@ -16,6 +16,8 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { appAlive, appendInbox } from "./inbox.mjs";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -335,13 +337,23 @@ export function deliverability({ platform = process.platform, env = process.env,
  * which is what the tests assert on — firing a real popup to check is not a
  * test anyone wants to run.
  */
-export function alert(cfg, { title = "Marmot", body = "", urgent = false, kind = "nudge", style: forced = null, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty" } = {}) {
+export function alert(cfg, { title = "Marmot", body = "", urgent = false, kind = "nudge", style: forced = null, platform = process.platform, stream = process.stderr, env = process.env, ttyPath = "/dev/tty", root = null } = {}) {
   const n = cfg?.notify ?? {};
   // A caller may insist on a banner — `marmot test-notification --banner` does,
   // to show you the other shape. It cannot insist the other way: that is the
   // user's setting to make.
   const style = forced === "banner" ? "banner" : notifyStyle(cfg, urgent, kind);
   const did = { bell: false, desktop: null, style };
+
+  // The menu bar app, when it is running, posts a real notification with the
+  // marmot on it — the thing the dialog stands in for. The handoff is a line in
+  // its inbox; a stale heartbeat or a failed write falls through to the dialog,
+  // so a closed app costs nothing. Only with a known Marmot root: a caller that
+  // passes its own `env` and no root never reaches a real inbox.
+  const appRoot = root ?? env?.MARMOT_ROOT ?? (env?.HOME ? join(env.HOME, ".claude") : null);
+  if (n.desktop && !silenced(env) && appRoot && appAlive(appRoot, { env }) && appendInbox(appRoot, { title, body, urgent, kind })) {
+    return { bell: false, desktop: { via: "Marmot app" }, style: "app" };
+  }
 
   if (n.bell && !silenced(env)) {
     // A hook's stderr is a pipe Claude Code reads, not a terminal, so a bell

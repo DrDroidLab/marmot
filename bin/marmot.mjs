@@ -58,6 +58,11 @@ if (has("help") || cmd === "help") {
     notifications     Every notification you were shown, and what it said. --json
     doctor            What is readable on this machine, and what is not
 
+  For the menu bar app (JSON)
+    status            Limits, cost, recommendations and settings in one payload
+    tick              New nudges to post; --app also drains what the hooks queued
+    refresh-limits    Ask Claude Code to refresh its limit snapshot (no tokens)
+
   Flags
     --days <n>        Window, default 30
     --root <dir>      Claude Code home, default ~/.claude
@@ -126,8 +131,12 @@ if (cmd === "init") {
     }
 
     const self = new URL("../scripts/hook.mjs", import.meta.url).pathname;
-    const entry = (timeout) => ({ hooks: [{ type: "command", command: `node "${self}"`, timeout }] });
-    const mine = (group) => (group?.hooks ?? []).some((h) => String(h.command ?? "").includes("marmot"));
+    // Installed from the Mac app, the engine runs on the Node inside the app —
+    // a clean Mac may have no `node` on the PATH Claude Code gives its hooks.
+    // Everywhere else `node` stays, so switching Node versions cannot orphan it.
+    const runtime = self.includes(".app/Contents/Resources/engine/") ? `"${process.execPath}"` : "node";
+    const entry = (timeout) => ({ hooks: [{ type: "command", command: `${runtime} "${self}"`, timeout }] });
+    const mine = (group) => (group?.hooks ?? []).some((h) => String(h.command ?? "").toLowerCase().includes("marmot"));
 
     settings.hooks ??= {};
     const changes = [];
@@ -874,6 +883,37 @@ if (cmd === "notifications" || cmd === "notifs") {
 
 if (cmd === "browse") {
   process.exit((await runBrowse()) ? 0 : 1);
+}
+
+// The menu bar app's three calls. Always JSON: nothing reads these but a program.
+if (cmd === "status") {
+  const { buildStatus } = await import("../src/status.mjs");
+  const demo = has("demo");
+  const out = buildStatus({
+    root: ROOT,
+    cfg,
+    days: DAYS,
+    demo,
+    sessions: demo ? (await import("../src/demo.mjs")).demoSessions() : null,
+    plan: demo
+      ? { plan: "Max 5×", limits: [{ kind: "session", label: "5-hour session", percent: 34, severity: "normal", resetsAt: new Date(Date.now() + 4200_000).toISOString(), active: true, expired: false }, { kind: "weekly_all", label: "weekly", percent: 61, severity: "normal", resetsAt: new Date(Date.now() + 260_000_000).toISOString(), active: true, expired: false }], spend: null, fetchedAt: Date.now(), ageMins: 3, stale: false }
+      : null,
+  });
+  process.stdout.write(JSON.stringify(out, null, has("pretty") ? 2 : 0) + "\n");
+  process.exit(0);
+}
+
+if (cmd === "tick") {
+  const { tick } = await import("../src/status.mjs");
+  process.stdout.write(JSON.stringify(has("demo") ? { version: 1, notifications: [], held: 0 } : tick({ root: ROOT, cfg, app: has("app") })) + "\n");
+  process.exit(0);
+}
+
+if (cmd === "refresh-limits") {
+  const { refreshUsage, readPlan } = await import("../src/plan.mjs");
+  const r = has("demo") ? { refreshed: false, reason: "demo" } : refreshUsage(ROOT);
+  process.stdout.write(JSON.stringify({ refreshed: r.refreshed === true, fetchedAt: r.plan?.fetchedAt ?? readPlan(ROOT).fetchedAt ?? null, reason: r.reason ?? null }) + "\n");
+  process.exit(0);
 }
 
 const sessions = has("demo")

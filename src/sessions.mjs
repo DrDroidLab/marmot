@@ -20,6 +20,18 @@ import { readServerConfigs } from "./mcp.mjs";
 export const defaultRoot = () => join(homedir(), ".claude");
 
 /**
+ * The calendar day a timestamp falls on where the user is, not in UTC. A chart
+ * of "today" that rolls over at 05:30 in Bangalore is a chart of someone else's
+ * day.
+ */
+export function localDay(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
  * Every transcript on disk.
  *
  * A session's own file sits at `projects/<project>/<id>.jsonl`. What a subagent
@@ -152,6 +164,9 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
     promptTimes: [],
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, thinking: 0 },
     cost: 0,
+    // Spend and tokens by the local day each turn happened, with the model
+    // split: { "2026-09-15": { cost, tokens, models: { model: { cost, tokens } } } }.
+    daily: {},
     pricedTurns: 0,
     unpricedModels: new Set(),
     toolCalls: {},
@@ -253,6 +268,22 @@ export function readSession({ path, id, project }, { rateOverrides } = {}) {
         s.models[msg.model] = (s.models[msg.model] ?? 0) + c;
         if (o.isSidechain) s.sidechain.cost += c;
       }
+
+      // By the day the turn happened, not the day the session ended: a session
+      // that runs for a week is a week of spend, and filing it all under its
+      // last day draws a spike that never happened.
+      const turnDay = o.timestamp ? localDay(o.timestamp) : null;
+      if (turnDay) {
+        const b = (s.daily[turnDay] ??= { cost: 0, tokens: 0, models: {} });
+        const turnTokens = inTok + outTok + readTok + writeTok;
+        b.cost += c ?? 0;
+        b.tokens += turnTokens;
+        if (msg.model && msg.model !== "<synthetic>") {
+          const m = (b.models[msg.model] ??= { cost: 0, tokens: 0 });
+          m.cost += c ?? 0;
+          m.tokens += turnTokens;
+        }
+      }
     }
 
     for (const b of msg.content ?? []) {
@@ -335,6 +366,16 @@ export function loadSessions({ root = defaultRoot(), days = 30, rateOverrides } 
     for (const [n, c] of Object.entries(s.toolErrorsByName)) parent.toolErrorsByName[n] = (parent.toolErrorsByName[n] ?? 0) + c;
     for (const [srv, n] of Object.entries(s.mcpCalls)) parent.mcpCalls[srv] = (parent.mcpCalls[srv] ?? 0) + n;
     for (const k of s.skills) parent.skills.add(k);
+    for (const [day, b] of Object.entries(s.daily)) {
+      const into = (parent.daily[day] ??= { cost: 0, tokens: 0, models: {} });
+      into.cost += b.cost;
+      into.tokens += b.tokens;
+      for (const [m, v] of Object.entries(b.models)) {
+        const mm = (into.models[m] ??= { cost: 0, tokens: 0 });
+        mm.cost += v.cost;
+        mm.tokens += v.tokens;
+      }
+    }
 
     parent.sidechainTurns += s.assistantTurns;
     parent.sidechain.turns += s.assistantTurns;
