@@ -226,7 +226,7 @@ struct MenuView: View {
 
     private var footer: some View {
         VStack(spacing: 1) {
-            MenuRow(title: "View Insights in Browser", systemImage: "safari") { store.openBrowser() }
+            MenuRow(title: "View session data", systemImage: "safari") { store.openBrowser() }
             MenuRow(title: "Refresh", systemImage: "arrow.clockwise", shortcut: "⌘R") { store.refreshNow() }
                 .keyboardShortcut("r")
             MenuRow(title: "Settings…", systemImage: "gearshape", shortcut: "⌘,") {

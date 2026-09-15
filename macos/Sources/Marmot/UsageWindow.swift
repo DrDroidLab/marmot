@@ -185,7 +185,7 @@ struct UsageWindowView: View {
             Button {
                 store.openBrowser()
             } label: {
-                Label("View Insights in Browser", systemImage: "safari")
+                Label("View session data", systemImage: "safari")
             }
         }
     }
@@ -310,7 +310,7 @@ private struct RecommendationsList: View {
                     Button {
                         store.openBrowser()
                     } label: {
-                        Label("View Insights in Browser", systemImage: "safari")
+                        Label("View session data", systemImage: "safari")
                     }
                 }
                 .padding(.top, 4)
