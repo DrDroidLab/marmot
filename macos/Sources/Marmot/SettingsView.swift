@@ -504,9 +504,18 @@ private struct AdvancedPane: View {
     @EnvironmentObject var store: Store
     @State private var doctor: String?
     @State private var working = false
+    @AppStorage("demoMode") private var demoMode = false
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Use demo data (for screenshots)", isOn: $demoMode)
+                    .onChange(of: demoMode) { _, _ in store.reloadEverything() }
+                Text("Shows synthetic sessions instead of your own, everywhere — the menu, the charts and the session page. The menu says \"demo\" while it is on.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Demo")
+            }
             Section("Nudge hooks") {
                 let hooks = store.status?.hooks
                 LabeledContent("Claude Code hooks") {

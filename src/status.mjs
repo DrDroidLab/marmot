@@ -17,8 +17,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { join, dirname } from "node:path";
 import { loadSessions, configuredServers, sessionDirs, mcpLastUsed, daysSince, localDay } from "./sessions.mjs";
 import { readPlan, usableLimits, limitPace, readAttribution, paysPerToken } from "./plan.mjs";
 import { evaluate, windowRules, limitSteps } from "./rules.mjs";
@@ -169,10 +168,14 @@ function pluginEnabled(root) {
 }
 
 /** Everything the dropdown and the settings window read. */
-export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions = null, plan = null, demo = false }) {
+export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions = null, plan = null, demo = false, configured: configuredOverride = null, sizes: sizesOverride = null, attribution: attributionOverride = null }) {
   const all = sessions ?? loadSessions({ root, days, rateOverrides: cfg.rateOverrides });
   const p = plan ?? readPlan(root, { now });
-  const attribution = demo ? null : readAttribution(root);
+  // A demo reads nothing from this machine, so what it would have measured is
+  // handed in instead: the servers, their weight, and Claude Code's own
+  // attribution. Without them every diagnosis is null and the menu has nothing
+  // to recommend.
+  const attribution = attributionOverride ?? (demo ? null : readAttribution(root));
   const t = totals(all);
   const series = dailySeries(all, days, now);
   const last = series[series.length - 1] ?? { day: localDay(now), cost: 0, tokens: 0 };
@@ -181,8 +184,8 @@ export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions =
   const todays = all.filter((s) => s.daily?.[today]);
 
   const dirs = demo ? [] : sessionDirs(all);
-  const configured = demo ? [] : configuredServers(root, dirs);
-  const sizes = demo ? null : readAudit(root);
+  const configured = configuredOverride ?? (demo ? [] : configuredServers(root, dirs));
+  const sizes = sizesOverride ?? (demo ? null : readAudit(root));
   // The session in front of you, when it is big enough to say anything about;
   // otherwise the dearest in the window, which is what the report explains.
   const recent = all[0] && all[0].cost >= (cfg.session?.costFloor ?? 1) ? all[0] : all.slice().sort((a, b) => b.cost - a.cost)[0] ?? null;
@@ -207,7 +210,7 @@ export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions =
     .slice(0, 10)
     .map((e) => ({ at: e.at ?? null, event: e.event ?? null, labels: e.nudge ?? (e.outcome === "digest shown" ? ["Daily digest"] : []) }));
 
-  const wiring = demo ? [] : hookWiring(root, { cwd: homedir() });
+  const wiring = demo ? [] : hookWiring(root, { cwd: dirname(root) });
   const missing = hooksMissing(wiring);
   const { _path, _exists, ...config } = cfg;
 

@@ -200,6 +200,44 @@ test("the CLI prints status and tick as JSON", (t) => {
   assert.equal(run(["status", "--demo"]).demo, true);
 });
 
+test("installing hooks with --force keeps your settings; only a bare init --force resets them", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const cfgPath = join(root, "marmot.json");
+  const mine = { limits: { byWindow: { session: [9, 50, 75, 90] } }, notify: { sound: "Glass" } };
+  writeFileSync(cfgPath, JSON.stringify(mine));
+  const cli = (args) => execFileSync(process.execPath, [CLI, ...args, "--root", root], { encoding: "utf8", env: ENV });
+
+  // What the app's Install hooks button and the menu card run.
+  cli(["init", "--hooks", "--force"]);
+  assert.deepEqual(JSON.parse(readFileSync(cfgPath, "utf8")), mine, "installing hooks must not touch the thresholds");
+  assert.match(readFileSync(join(root, "settings.json"), "utf8"), /hook\.mjs/, "and the hooks are installed");
+
+  cli(["init", "--statusline", "--force"]);
+  assert.deepEqual(JSON.parse(readFileSync(cfgPath, "utf8")), mine, "nor does the statusline");
+
+  cli(["init", "--force"]);
+  assert.equal(JSON.parse(readFileSync(cfgPath, "utf8")).notify.sound, "Ping", "a bare init --force still resets to the defaults");
+});
+
+test("the demo has everything a screenshot needs: limits, a chart, and advice", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = JSON.parse(execFileSync(process.execPath, [CLI, "status", "--demo", "--days", "30", "--root", root], { encoding: "utf8", env: ENV }));
+
+  assert.equal(s.demo, true);
+  assert.ok(s.plan.name, "a plan to show");
+  assert.ok(s.limits.some((l) => (l.percent ?? 0) > 0), "limit bars with something in them");
+  assert.ok(s.daily.filter((d) => d.cost > 0).length >= 5, "enough days for a chart");
+  assert.ok(s.daily.some((d) => d.models.length), "days carry their model split");
+  assert.ok(s.recommendations.length >= 2, `recommendations to read, got ${s.recommendations.length}`);
+  assert.ok(
+    s.recommendations.some((r) => r.source === "claude-code"),
+    "including Claude Code's own attribution",
+  );
+  assert.ok(s.window.cost > 0 && s.window.tokens > 0);
+});
+
 /** A Max 20× snapshot with these windows live: [[kind, percent], ...]. */
 function withLimits(root, windows) {
   writeFileSync(

@@ -105,8 +105,13 @@ if (has("help") || cmd === "help") {
 const cfg = loadConfig(ROOT);
 
 if (cmd === "init") {
-  if (existsSync(cfg._path) && !has("force")) {
-    process.stdout.write(`${cfg._path} already exists. Re-run with --force to overwrite.\n`);
+  // `--force` means "replace my hooks" when it comes with --hooks or
+  // --statusline, and only a bare `init --force` means "reset my thresholds".
+  // Letting the one flag do both reset every setting of anyone who clicked
+  // Install hooks in the Mac app.
+  const resetConfig = has("force") && !has("hooks") && !has("statusline");
+  if (existsSync(cfg._path) && !resetConfig) {
+    if (!has("hooks") && !has("statusline")) process.stdout.write(`${cfg._path} already exists. Re-run with --force to overwrite.\n`);
   } else {
     const { _path, _exists, ...body } = { ...DEFAULTS };
     writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
@@ -889,12 +894,18 @@ if (cmd === "browse") {
 if (cmd === "status") {
   const { buildStatus } = await import("../src/status.mjs");
   const demo = has("demo");
+  const demoMod = demo ? await import("../src/demo.mjs") : null;
   const out = buildStatus({
     root: ROOT,
     cfg,
     days: DAYS,
     demo,
-    sessions: demo ? (await import("../src/demo.mjs")).demoSessions() : null,
+    // What a demo pretends to have measured, so the recommendations it shows
+    // are the same shape as a real machine's.
+    configured: demo ? demoMod.demoConfiguredServers : null,
+    sizes: demo ? demoMod.demoMcpSizes : null,
+    attribution: demo ? demoMod.demoAttribution : null,
+    sessions: demo ? demoMod.demoSessions() : null,
     plan: demo
       ? { plan: "Max 5×", limits: [{ kind: "session", label: "5-hour session", percent: 34, severity: "normal", resetsAt: new Date(Date.now() + 4200_000).toISOString(), active: true, expired: false }, { kind: "weekly_all", label: "weekly", percent: 61, severity: "normal", resetsAt: new Date(Date.now() + 260_000_000).toISOString(), active: true, expired: false }], spend: null, fetchedAt: Date.now(), ageMins: 3, stale: false }
       : null,
