@@ -5,6 +5,7 @@
 <p align="center"><strong>A Mac menu bar app that shows your Claude limits and spend—and tells you what is wasting tokens, and what to do next.</strong></p>
 
 <p align="center">
+  <a href="https://drdroid.io/marmot"><img src="https://img.shields.io/badge/website-drdroid.io%2Fmarmot-8E5F38" alt="Website: drdroid.io/marmot"></a>
   <a href="https://github.com/DrDroidLab/marmot"><img src="https://img.shields.io/badge/status-alpha-E79545" alt="Status: alpha"></a>
   <a href="https://github.com/DrDroidLab/marmot/releases"><img src="https://img.shields.io/badge/macOS-14%2B-5E8C6A" alt="macOS 14 or newer"></a>
   <a href="https://github.com/DrDroidLab/marmot/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-5E8C6A" alt="License: MIT"></a>
@@ -19,6 +20,8 @@ failures, or a costly model doing light work.
 The useful part is timing. Marmot can nudge you at the end of a turn, while
 starting fresh, compacting, or changing course can still save the next one.
 No account, no server: everything stays on your Mac.
+
+More at **[drdroid.io/marmot](https://drdroid.io/marmot)**.
 
 <p align="center">
   <img src="docs/app/menu.png" alt="The Marmot menu with numbered callouts: 1 the Cost and Tokens toggle, 2 Expand, 3 See all recommendations, 4 View session data, 5 Settings" width="380">
@@ -371,9 +374,6 @@ brew uninstall --cask marmot                # remove the app
 
 Before removing, **Settings… → Advanced → Remove** takes Marmot's hooks out of
 Claude Code. To remove its settings and logs too, delete `~/.claude/marmot*`.
-
-Prefer the terminal? Everything here is also a command:
-[Marmot from the terminal](docs/cli.md).
 
 ## Contributing
 
