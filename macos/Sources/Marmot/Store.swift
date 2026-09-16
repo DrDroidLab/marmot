@@ -15,6 +15,9 @@ final class Store: ObservableObject {
     /// The expanded usage window's payloads, one per range in days.
     @Published var usage: [Int: Status] = [:]
     @Published var usageLoading: Set<Int> = []
+    /// The menu's "Install hooks" card: in progress, and what happened.
+    @Published var installingHooks = false
+    @Published var hooksNote: String?
 
     private let engine = Engine.shared
     private var timer: Timer?
@@ -171,6 +174,27 @@ final class Store: ObservableObject {
             } catch {
                 lastError = error.localizedDescription
             }
+        }
+    }
+
+    /// The same command as Settings → Advanced → Install hooks, from the menu's
+    /// setup card. Homebrew cannot do this: it would mean editing Claude Code's
+    /// settings behind the user's back, so the app asks once instead.
+    func installHooks() {
+        guard !installingHooks else { return }
+        installingHooks = true
+        hooksNote = nil
+        Task {
+            defer { installingHooks = false }
+            do {
+                let out = try await engine.run(["init", "--hooks", "--force"], timeout: 30)
+                hooksNote = out.code == 0
+                    ? "Installed. Restart Claude Code to start long-session nudges and the daily digest."
+                    : (out.stderr.split(separator: "\n").last.map(String.init) ?? "Could not install the hooks.")
+            } catch {
+                hooksNote = error.localizedDescription
+            }
+            await loadStatus()
         }
     }
 

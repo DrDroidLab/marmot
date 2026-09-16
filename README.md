@@ -50,10 +50,10 @@ download? Take the `.dmg` from
 Applications, and on first open use System Settings → Privacy & Security →
 **Open Anyway**.
 
-**One step after installing:** open the menu, then **Settings… → Advanced →
-Install hooks**, and restart Claude Code. The app watches your limits on its
-own, but the nudges that come from inside Claude Code — a long session, a cost
-cap — need its hooks, and Homebrew does not install them for you.
+**The first time you open the menu,** Marmot offers to **Install hooks** for
+Claude Code. Click it and restart Claude Code to get long-session nudges and the
+daily digest. Limits, cost and limit notifications work without it, and you can
+do it later from **Settings… → Advanced**.
 
 Out of the box, you will hear about:
 

@@ -8,6 +8,7 @@ struct MenuView: View {
     /// menu grows by a line or two at most.
     @State private var expandedRec: Int?
     @AppStorage("chartMetric") private var metric = "cost"
+    @AppStorage("hooksPromptDismissed") private var hooksPromptDismissed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,6 +20,11 @@ struct MenuView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .wraps()
+                    .padding(.bottom, 10)
+            }
+
+            if let status = store.status, showHooksCard(status) {
+                hooksCard
                     .padding(.bottom, 10)
             }
 
@@ -74,6 +80,67 @@ struct MenuView: View {
                     .foregroundStyle(plan.stale == true ? Color.orange : Color.secondary)
             }
         }
+    }
+
+    // MARK: setup
+
+    /// Only while there is something to do or something to report: hooks
+    /// missing, not already provided by the old plugin (installing them again
+    /// would send every nudge twice), not in demo data, and not dismissed.
+    private func showHooksCard(_ status: Status) -> Bool {
+        if store.hooksNote != nil { return true }
+        if hooksPromptDismissed || status.demo == true || status.hooks?.plugin == true { return false }
+        let installed = status.hooks?.installed == true && (status.hooks?.missing ?? []).isEmpty
+        return !installed
+    }
+
+    private var hooksCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let note = store.hooksNote {
+                let ok = note.hasPrefix("Installed")
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(ok ? Color.green : Color.orange)
+                    Text(note).font(.caption).wraps()
+                    Spacer(minLength: 0)
+                    Button("OK") { store.hooksNote = nil }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                }
+            } else {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Turn on nudges inside Claude Code").font(.callout.weight(.semibold))
+                        Text("Long-session nudges and the daily digest need Claude Code hooks. Limits work without them.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .wraps()
+                    }
+                }
+                HStack(spacing: 10) {
+                    Button {
+                        store.installHooks()
+                    } label: {
+                        if store.installingHooks {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Text("Install hooks")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(store.installingHooks)
+                    Button("Not now") { hooksPromptDismissed = true }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
+                .padding(.leading, 22)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
     }
 
     // MARK: limits
