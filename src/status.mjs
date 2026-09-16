@@ -17,8 +17,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { join, dirname } from "node:path";
 import { loadSessions, configuredServers, sessionDirs, mcpLastUsed, daysSince, localDay } from "./sessions.mjs";
 import { readPlan, usableLimits, limitPace, readAttribution, paysPerToken } from "./plan.mjs";
 import { evaluate, windowRules, limitSteps } from "./rules.mjs";
@@ -211,7 +210,7 @@ export function buildStatus({ root, cfg, days = 30, now = Date.now(), sessions =
     .slice(0, 10)
     .map((e) => ({ at: e.at ?? null, event: e.event ?? null, labels: e.nudge ?? (e.outcome === "digest shown" ? ["Daily digest"] : []) }));
 
-  const wiring = demo ? [] : hookWiring(root, { cwd: homedir() });
+  const wiring = demo ? [] : hookWiring(root, { cwd: dirname(root) });
   const missing = hooksMissing(wiring);
   const { _path, _exists, ...config } = cfg;
 

@@ -105,8 +105,13 @@ if (has("help") || cmd === "help") {
 const cfg = loadConfig(ROOT);
 
 if (cmd === "init") {
-  if (existsSync(cfg._path) && !has("force")) {
-    process.stdout.write(`${cfg._path} already exists. Re-run with --force to overwrite.\n`);
+  // `--force` means "replace my hooks" when it comes with --hooks or
+  // --statusline, and only a bare `init --force` means "reset my thresholds".
+  // Letting the one flag do both reset every setting of anyone who clicked
+  // Install hooks in the Mac app.
+  const resetConfig = has("force") && !has("hooks") && !has("statusline");
+  if (existsSync(cfg._path) && !resetConfig) {
+    if (!has("hooks") && !has("statusline")) process.stdout.write(`${cfg._path} already exists. Re-run with --force to overwrite.\n`);
   } else {
     const { _path, _exists, ...body } = { ...DEFAULTS };
     writeFileSync(cfg._path, JSON.stringify(body, null, 2) + "\n");
