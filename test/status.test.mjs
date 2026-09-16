@@ -200,6 +200,24 @@ test("the CLI prints status and tick as JSON", (t) => {
   assert.equal(run(["status", "--demo"]).demo, true);
 });
 
+test("the demo has everything a screenshot needs: limits, a chart, and advice", (t) => {
+  const { root, cleanup } = tmpRoot();
+  t.after(cleanup);
+  const s = JSON.parse(execFileSync(process.execPath, [CLI, "status", "--demo", "--days", "30", "--root", root], { encoding: "utf8", env: ENV }));
+
+  assert.equal(s.demo, true);
+  assert.ok(s.plan.name, "a plan to show");
+  assert.ok(s.limits.some((l) => (l.percent ?? 0) > 0), "limit bars with something in them");
+  assert.ok(s.daily.filter((d) => d.cost > 0).length >= 5, "enough days for a chart");
+  assert.ok(s.daily.some((d) => d.models.length), "days carry their model split");
+  assert.ok(s.recommendations.length >= 2, `recommendations to read, got ${s.recommendations.length}`);
+  assert.ok(
+    s.recommendations.some((r) => r.source === "claude-code"),
+    "including Claude Code's own attribution",
+  );
+  assert.ok(s.window.cost > 0 && s.window.tokens > 0);
+});
+
 /** A Max 20× snapshot with these windows live: [[kind, percent], ...]. */
 function withLimits(root, windows) {
   writeFileSync(

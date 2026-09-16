@@ -18,9 +18,42 @@ failures, or a costly model doing light work.
 The useful part is timing. Marmot can nudge you at the end of a turn, while
 starting fresh, compacting, or changing course can still save the next one.
 
+<p align="center">
+  <img src="docs/app/menu.png" alt="The Marmot menu with numbered callouts: 1 the Cost and Tokens toggle, 2 Expand, 3 See all recommendations, 4 View session data, 5 Settings" width="380">
+</p>
+
+Click the marmot in your menu bar to open this menu. From there:
+
+| | Click | What it opens |
+|---|---|---|
+| **1** | **Cost / Tokens** | Switches the 14-day chart between dollars and tokens |
+| **2** | **Expand** ↗ | The [usage window](#expand-for-the-long-view): 7, 30 or 90 days, by model |
+| **3** | **See all ›** | The [recommendations](#recommendations-not-just-numbers), in full |
+| **4** | **View session data** | The [session browser](#see-where-the-tokens-went) in your web browser |
+| **5** | **Settings…** | [When to notify you](#tell-it-when-to-speak) and [what the menu bar shows](#make-the-menu-bar-yours) |
+
 ## Install
 
-Requires Node.js 18 or newer.
+**Mac app** — the menu bar, the charts and the nudges:
+
+```bash
+brew install --cask drdroidlab/tap/marmot
+```
+
+macOS 14 or newer, on Apple Silicon or Intel. Node ships inside the app, so
+nothing else needs installing, and the `marmot` command comes with it — which is
+also why the app is about 240 MB (a 78 MB download). Prefer a download? Take the
+`.dmg` from [Releases](https://github.com/DrDroidLab/marmot/releases), drag
+Marmot to Applications, and on first open use System Settings → Privacy &
+Security → **Open Anyway**.
+
+**One step after installing:** open the menu, then **Settings… → Advanced →
+Install hooks**. The app watches your limits on its own, but the nudges that
+come from inside Claude Code — a long session, a cost cap — need its hooks, and
+Homebrew does not install them for you. Restart Claude Code afterwards.
+
+**CLI only** — the report and the nudges, no menu bar. Requires Node.js 18 or
+newer:
 
 ```bash
 npm install -g github:DrDroidLab/marmot
@@ -46,21 +79,127 @@ Out of the box, you will hear about:
 Want to look first? `marmot --demo` uses synthetic data and reads none of your
 sessions.
 
-### Menu bar app (macOS)
+### Update or remove
 
 ```bash
-brew install --cask drdroidlab/tap/marmot
+brew update && brew upgrade --cask marmot    # the app
+brew uninstall --cask marmot                 # remove it
+
+npm install -g github:DrDroidLab/marmot      # the CLI
+marmot init --hooks --remove                 # remove Marmot's hooks
 ```
 
-Marmot in the menu bar: your plan limits, today's and this month's modelled
-cost, a 14-day chart, and the recommendations from the report — one click from
-the clock. Its Settings window edits the same `~/.claude/marmot.json` the CLI
-does, so every threshold below has a control.
+## The menu bar app
 
-While the app is running, the hooks hand their nudges to it instead of opening
-a dialog, and it also checks your limits between turns. Node ships inside the
-app, so a Mac without Node needs nothing else, and so does its own copy of the
-CLI, linked as `marmot`. Build it yourself with `macos/scripts/package.sh`; see
+One click from the clock: the limits Claude actually enforces, what today and
+the last 30 days cost, and what to do about it. Its Settings window edits the
+same `~/.claude/marmot.json` the CLI does, so every threshold below has a
+control.
+
+### Your limits, in colour
+
+<p align="center">
+  <img src="docs/app/limits.png" alt="The limits at the top of the menu: a green 5-hour session bar at 34% and a yellow weekly bar at 61%, with a lightning mark and reset times" width="480">
+</p>
+
+The 5-hour session window and the week, at the top of the menu, each with when
+it resets:
+
+| You see | It means |
+|---|---|
+| Green bar | Below 50% of that window |
+| Yellow bar | 50% or more |
+| Red bar | 75% or more |
+| ⚡ next to a limit | You are spending it faster than it refills — at this pace it runs out before it resets |
+| **just reset** | The window rolled over since the last reading; it shows 0% until the next one arrives |
+| **updated 12m ago** | How old the limit reading is. **Refresh** (⌘R) asks Claude Code for a new one, at no token cost |
+
+Limits cover every Claude product on your plan — Claude Code, Cowork and chat —
+because Anthropic counts them together.
+
+### Cost and tokens, by your local day
+
+Today and the window total, then a 14-day chart you can switch between dollars
+and tokens with **1 · Cost / Tokens**. Hover a bar for that day's models.
+
+### Expand for the long view
+
+Open it with **2 · Expand** in the menu.
+
+<p align="center">
+  <img src="docs/app/usage-window.png" alt="The expanded usage window: 7, 30 and 90-day ranges, a bar chart stacked by model, totals, and a table of models" width="760">
+</p>
+
+7, 30 or 90 days, stacked by model, with totals, your peak day, and a per-model
+table. Cost or tokens, the same toggle. Hover a bar for that day's breakdown.
+
+### Recommendations, not just numbers
+
+Open it with **3 · See all ›** in the menu, or the **Recommendations** tab in
+the usage window.
+
+<p align="center">
+  <img src="docs/app/recommendations.png" alt="The Recommendations tab, listing what is costing tokens, what to do, and where each finding came from" width="760">
+</p>
+
+The menu shows the two that matter — click one to see what to do — and this
+tab shows them all: what is happening, what to do, and where the finding came
+from.
+
+| Dot | Source |
+|---|---|
+| Orange (red when urgent) | A threshold you set was crossed — a limit mark, a long session |
+| Blue | Advice: measured by Marmot from your session files, or quoted from Claude Code's own `/usage` report |
+
+### Tell it when to speak
+
+Open it with **5 · Settings… → Notifications**.
+
+<p align="center">
+  <img src="docs/app/settings-notifications.png" alt="Settings: separate percentage lists for the 5-hour session limit and the weekly limit, each with marks you can add or remove" width="640">
+</p>
+
+Separate lists of marks for the 5-hour window and the week. Type a number and
+press **Add**, or click **×** on a mark to remove it. The bar underneath shows
+where you are now, with a tick at each mark. **Reset to plan default** puts back
+50%, 75% and 90%. The same tab sets long-session marks, the daily digest, how
+nudges look and sound, and has buttons to send a test.
+
+While the app is running, Claude Code's hooks hand their nudges to it instead of
+opening a dialog, and it checks your limits between turns, so a limit mark
+reaches you even when you are not at the keyboard. **View session data** opens
+the local browser page below.
+
+### Make the menu bar yours
+
+Open it with **5 · Settings… → General**.
+
+<p align="center">
+  <img src="docs/app/general-settings.png" alt="Settings, General tab: launch at login, what the menu bar shows, which limit, how often limits refresh, and the totals window" width="560">
+</p>
+
+**Settings… → General** decides what sits next to the marmot in your menu bar:
+
+| Setting | Choices |
+|---|---|
+| **Menu bar shows** | Limit % · Today's cost · Limit % and cost · Icon only |
+| **Which limit** | 5-hour session and weekly (`5h 34% · W 61%`) · 5-hour session · Weekly · Whichever is highest |
+| **Refresh limits every** | 5, 15 or 30 minutes, or manually |
+| **Totals window** | 7 or 30 days, for the cost and token figures |
+| **Launch at login** | Start Marmot with your Mac |
+
+### Settings at a glance
+
+| Tab | What lives there |
+|---|---|
+| **General** | The menu bar display, limit refresh, totals window, launch at login |
+| **Notifications** | How nudges look and sound, the percentage marks for each window, long-session marks, the daily digest, test buttons, recent notifications |
+| **Advanced limits** | Limit nudges on or off, the pace warning, what counts as an unusual day |
+| **Advanced** | Install or remove Claude Code's hooks, demo data for screenshots, MCP measuring, the hook log, open `marmot.json`, run the doctor |
+
+In the menu, **⌘R** refreshes, **⌘,** opens Settings and **⌘Q** quits.
+
+Build it yourself with `macos/scripts/package.sh`; see
 [`macos/README.md`](macos/README.md).
 
 ## What a nudge looks like
@@ -147,6 +286,10 @@ The report gives every figure a window and a source. Run `marmot browse` when
 you want to open a session and follow a number down to the turn that caused it.
 The browser is one local HTML file with no network calls; `browse --no-text`
 leaves prompts and replies out.
+
+<p align="center">
+  <img src="docs/app/session-browser.png" alt="The local session browser page, listing sessions with their cost, prompts and models" width="760">
+</p>
 
 ## Commands
 
@@ -269,6 +412,9 @@ marmot config --print  # print it in the terminal
 Nothing needs restarting—the next run reads it. Marmot uses `$VISUAL`, then
 `$EDITOR`, then the platform default. A terminal editor is used only when there
 is a terminal to attach it to.
+
+In the app, **Settings → Notifications** writes the same keys: the percentage
+lists per window, the long-session marks, the digest and the delivery style.
 
 ### Reminders
 
@@ -463,6 +609,10 @@ A turn means a prompt you typed. Tool results also appear as `user` entries in
 Claude Code's records, but Marmot does not count them as human prompts. These
 cases are pinned by the test suite.
 
+Cost and tokens are counted on the day each turn happened, in your own time
+zone, so a session that runs past midnight is two days of work rather than a
+spike on the day it ended.
+
 ## Good to know
 
 - **Local by design.** Marmot has no account or hosted service.
@@ -474,6 +624,14 @@ cases are pinned by the test suite.
   `mcp.autoAudit=false` if you do not want that.
 - **Subscription dollars are estimates.** `Modelled spend` is the API-rate value,
   not your invoice; the plan-limit percentage is the useful ceiling.
+- **Claude Cowork counts toward your limits, not your cost.** Cowork keeps its
+  sessions in the cloud or inside its own virtual machine, so the limit bars
+  include it while the cost, tokens and chart cannot.
+- **What it reads and writes.** It reads `~/.claude/projects` (Claude Code's
+  session records) and `~/.claude.json` (your plan and limit reading). It
+  writes only `~/.claude/marmot*` files: your settings, what it has already
+  told you, its logs, and the generated session pages. Delete them to start
+  over.
 - **Marmot is alpha.** Claude Code's session format is internal and can change.
   `marmot doctor` shows what remains readable.
 
@@ -544,12 +702,18 @@ marmot config set notify.desktop=false
 marmot config set notify.bell=false
 ```
 
-## Update or remove
+While the app is running it delivers these itself, so the dialog settings apply
+only when the app is closed.
 
-```bash
-npm install -g github:DrDroidLab/marmot  # update
-marmot init --hooks --remove             # remove Marmot hooks
-```
+### In the menu bar app
+
+| You see | Do this |
+|---|---|
+| **No current limit reading** | Press **Refresh** (⌘R). The first reading can take about 20 seconds. |
+| Limit nudges arrive, but nothing about long sessions or cost | **Settings… → Advanced → Install hooks**, then restart Claude Code |
+| Nothing arrives at all | **Settings… → Notifications → Send test notification**; if that is silent too, check Focus / Do Not Disturb |
+| "Marmot can't be opened" after a DMG download | System Settings → Privacy & Security → **Open Anyway**, once |
+| Numbers look wrong | **Settings… → Advanced → Run doctor** shows what Marmot can and cannot read |
 
 ## Contributing
 

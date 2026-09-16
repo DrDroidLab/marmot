@@ -32,6 +32,25 @@ final class Store: ObservableObject {
 
     var windowDays: Int { max(1, UserDefaults.standard.integer(forKey: "windowDays")) }
 
+    /// Synthetic sessions instead of this machine's own, for screenshots and
+    /// demos. `MARMOT_DEMO=1` turns it on for one launch; the Advanced setting
+    /// keeps it on. Every engine call carries it, so nothing real can leak into
+    /// a picture — the menu says "demo" while it is on.
+    var demoMode: Bool {
+        if ProcessInfo.processInfo.environment["MARMOT_DEMO"] == "1" { return true }
+        return UserDefaults.standard.bool(forKey: "demoMode")
+    }
+
+    private func args(_ base: [String]) -> [String] { demoMode ? base + ["--demo"] : base }
+
+    /// Called when the setting is flipped: drop what was read under the old mode.
+    func reloadEverything() {
+        usage.removeAll()
+        Task {
+            await loadStatus()
+        }
+    }
+
     func start() {
         guard timer == nil else { return }
         Task {
@@ -58,7 +77,7 @@ final class Store: ObservableObject {
         loading = true
         defer { loading = false }
         do {
-            let (status, data) = try await engine.json(Status.self, ["status", "--json", "--days", String(windowDays)], timeout: 60)
+            let (status, data) = try await engine.json(Status.self, args(["status", "--json", "--days", String(windowDays)]), timeout: 60)
             self.status = status
             if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                var cfg = root["config"] as? [String: Any] {
@@ -79,7 +98,7 @@ final class Store: ObservableObject {
         usageLoading.insert(days)
         defer { usageLoading.remove(days) }
         do {
-            let (status, _) = try await engine.json(Status.self, ["status", "--json", "--days", String(days)], timeout: 90)
+            let (status, _) = try await engine.json(Status.self, args(["status", "--json", "--days", String(days)]), timeout: 90)
             usage[days] = status
         } catch {
             lastError = error.localizedDescription
@@ -107,7 +126,7 @@ final class Store: ObservableObject {
 
     func tick() async {
         do {
-            let (result, _) = try await engine.json(TickResult.self, ["tick", "--json", "--app"], timeout: 60)
+            let (result, _) = try await engine.json(TickResult.self, args(["tick", "--json", "--app"]), timeout: 60)
             for n in result.notifications ?? [] {
                 Notifier.shared.deliver(n, config: config)
             }
@@ -147,7 +166,7 @@ final class Store: ObservableObject {
     func openBrowser() {
         Task {
             do {
-                let out = try await engine.run(["browse"], timeout: 180)
+                let out = try await engine.run(args(["browse"]), timeout: 180)
                 if out.code != 0 { lastError = out.stderr.split(separator: "\n").last.map(String.init) ?? "Could not build the session page." }
             } catch {
                 lastError = error.localizedDescription

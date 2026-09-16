@@ -889,12 +889,18 @@ if (cmd === "browse") {
 if (cmd === "status") {
   const { buildStatus } = await import("../src/status.mjs");
   const demo = has("demo");
+  const demoMod = demo ? await import("../src/demo.mjs") : null;
   const out = buildStatus({
     root: ROOT,
     cfg,
     days: DAYS,
     demo,
-    sessions: demo ? (await import("../src/demo.mjs")).demoSessions() : null,
+    // What a demo pretends to have measured, so the recommendations it shows
+    // are the same shape as a real machine's.
+    configured: demo ? demoMod.demoConfiguredServers : null,
+    sizes: demo ? demoMod.demoMcpSizes : null,
+    attribution: demo ? demoMod.demoAttribution : null,
+    sessions: demo ? demoMod.demoSessions() : null,
     plan: demo
       ? { plan: "Max 5×", limits: [{ kind: "session", label: "5-hour session", percent: 34, severity: "normal", resetsAt: new Date(Date.now() + 4200_000).toISOString(), active: true, expired: false }, { kind: "weekly_all", label: "weekly", percent: 61, severity: "normal", resetsAt: new Date(Date.now() + 260_000_000).toISOString(), active: true, expired: false }], spend: null, fetchedAt: Date.now(), ageMins: 3, stale: false }
       : null,

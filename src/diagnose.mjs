@@ -62,7 +62,7 @@ function idleServers(ctx) {
     line:
       `${measured.length} MCP server${measured.length === 1 ? "" : "s"}` +
       (longest !== null ? ` unused for ${longest} day${longest === 1 ? "" : "s"}` : " never called") +
-      ` add ${tokens(total)} tokens per request: ${named.join(", ")}.`,
+      ` ${measured.length === 1 ? "adds" : "add"} ${tokens(total)} tokens per request: ${named.join(", ")}.`,
     action: "Detaching what you do not use is a straight saving on every request.",
   };
 }
